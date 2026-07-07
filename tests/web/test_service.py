@@ -41,9 +41,7 @@ def test_happy_path_returns_result(
 ) -> None:
     _patch_profile(mocker, profile_with_repos)
     _stub_anthropic(mocker)
-    report = GapReport(
-        profile_login="octocat", supported=(), unsupported=(), github_is_empty=False
-    )
+    report = GapReport(profile_login="octocat", supported=(), unsupported=(), github_is_empty=False)
     plan = ProjectPlan(profile_login="octocat", suggestions=(), github_is_empty=False)
     mocker.patch.object(service, "build_gap_report", return_value=report)
     mocker.patch.object(service, "build_project_plan", return_value=plan)
@@ -62,9 +60,7 @@ def test_empty_github_is_a_success_not_an_error(
     """Our real user: an empty GitHub must be a normal result, never an error."""
     _patch_profile(mocker, empty_profile)
     _stub_anthropic(mocker)
-    report = GapReport(
-        profile_login="newgrad", supported=(), unsupported=(), github_is_empty=True
-    )
+    report = GapReport(profile_login="newgrad", supported=(), unsupported=(), github_is_empty=True)
     plan = ProjectPlan(profile_login="newgrad", suggestions=(), github_is_empty=True)
     mocker.patch.object(service, "build_gap_report", return_value=report)
     mocker.patch.object(service, "build_project_plan", return_value=plan)
@@ -75,9 +71,7 @@ def test_empty_github_is_a_success_not_an_error(
     assert outcome.report.github_is_empty is True
 
 
-def test_user_not_found_maps_to_404(
-    mocker: MockerFixture, config: Config
-) -> None:
+def test_user_not_found_maps_to_404(mocker: MockerFixture, config: Config) -> None:
     instance = mocker.patch.object(service, "GitHubClient").return_value
     instance.fetch_profile.side_effect = UserNotFoundError("nope")
 
