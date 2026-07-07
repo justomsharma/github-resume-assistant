@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}GitHub Resume Assistant{% endblock %}
+
+{% block content %}
+<!-- ============ SCREEN 1: LANDING ============ -->
+<section class="screen active" id="s-landing">
+  <div class="lede">
+    <div class="kicker">No install. No account.</div>
+    <h1>Make your resume <em>credible</em>, not just polished.</h1>
+    <p>Paste your resume and your GitHub username. Get back what your public work proves, and a 30-day plan to close the rest.</p>
+  </div>
+
+  {% if error %}<div class="alert" role="alert">{{ error }}</div>{% endif %}
+
+  <form class="form" id="analyzeForm" method="post" action="{{ url_for('analyze') }}">
+    <label for="resume">Your resume</label>
+    <textarea class="field" id="resume" name="resume_text" placeholder="Paste the full text of your resume. Nothing is stored — it's analyzed and discarded.">{{ resume_text or "" }}</textarea>
+
+    <label for="username" style="margin-top:16px;">GitHub username</label>
+    <div class="gh">
+      <span class="pre">github.com/</span>
+      <input class="field" id="username" name="username" value="{{ username or "" }}" autocomplete="off" spellcheck="false" placeholder="octocat">
+    </div>
+
+    <div class="row">
+      <span class="assure"><span class="lock">&#9679;</span> Public repos only. We never ask for a token or private access.</span>
+      <button class="btn btn-p" type="submit">Show me the gap &rarr;</button>
+    </div>
+  </form>
+
+  <div class="how">
+    <div class="c"><div class="n">&#8478; 1</div><div class="t">Read your claims</div><div class="d">Pulls the strongest, checkable claims from your resume.</div></div>
+    <div class="c"><div class="n">&#8478; 2</div><div class="t">Check reality</div><div class="d">Cross-references them against your real public repos.</div></div>
+    <div class="c"><div class="n">&#8478; 3</div><div class="t">Prescribe</div><div class="d">Ranks a 30-day plan to prove what isn't shown yet.</div></div>
+  </div>
+</section>
+
+<!-- ============ SCREEN 2: LOADING (shown by JS while the POST is in flight) ============ -->
+<section class="screen" id="s-loading">
+  <div class="load">
+    <div class="head"><span class="spin" aria-hidden="true"></span><h2>Reading your work</h2></div>
+    <p class="sub">This takes a few seconds. We're grounding everything in <span id="loadHandle">your</span>'s real GitHub.</p>
+    <div class="steps" id="loadSteps"></div>
+  </div>
+</section>
+{% endblock %}
