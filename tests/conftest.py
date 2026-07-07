@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from resume_assistant.core.models import Profile, Repo
+from resume_assistant.core.models import Profile, Repo, RepoEvidence
 
 
 @pytest.fixture
@@ -66,6 +66,23 @@ def empty_profile() -> Profile:
         followers=0,
         repos=[],
     )
+
+
+@pytest.fixture
+def repo_evidence() -> list[RepoEvidence]:
+    """Code-level evidence for octocat's one non-fork repo (go-cache)."""
+    return [
+        RepoEvidence(
+            repo_name="go-cache",
+            primary_language="Go",
+            language_breakdown=(("Go", 12000), ("Shell", 300)),
+            dependencies=("github.com/redis/go-redis", "golang.org/x/sync"),
+            notable_paths=("Dockerfile", "src/cache.go", "tests/cache_test.go"),
+            file_count=14,
+            readme_excerpt="# go-cache\nA distributed cache with an LRU eviction policy.",
+            pushed_at="2024-06-01T00:00:00Z",
+        )
+    ]
 
 
 @pytest.fixture

@@ -8,6 +8,14 @@ arrive with v0.2; ``Suggestion`` with v0.3.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
+
+# The three honest verdicts a claim can earn against real public code.
+# ``backed`` — public code proves it (cites specific files). ``not_shown`` — no
+# public code proves it yet (a gap to close). ``not_verifiable`` — the kind of
+# claim public code structurally can't prove (private/enterprise usage, latency
+# numbers, "300+/day", cost percentages).
+Verdict = Literal["backed", "not_shown", "not_verifiable"]
 
 
 @dataclass(frozen=True)
@@ -22,6 +30,7 @@ class Repo:
     created_at: str | None
     last_pushed_at: str | None
     is_fork: bool
+    default_branch: str | None = None
 
 
 @dataclass(frozen=True)
@@ -47,6 +56,27 @@ class Profile:
 
 
 @dataclass(frozen=True)
+class RepoEvidence:
+    """Code-level facts about a single public repo, used to ground verdicts.
+
+    Fetched by ``clients/github.py`` (never in ``core/``). Every field is bounded
+    so a repo with a huge README or dependency list can't blow the LLM token
+    budget: ``readme_excerpt`` is truncated to a char cap, ``dependencies`` and
+    ``notable_paths`` are capped lists, and ``file_count`` records how many paths
+    the repo actually has so a truncated ``notable_paths`` still reads honestly.
+    """
+
+    repo_name: str
+    primary_language: str | None
+    language_breakdown: tuple[tuple[str, int], ...]
+    dependencies: tuple[str, ...]
+    notable_paths: tuple[str, ...]
+    file_count: int
+    readme_excerpt: str | None
+    pushed_at: str | None
+
+
+@dataclass(frozen=True)
 class Claim:
     """One concrete, verifiable claim extracted from a resume.
 
@@ -62,32 +92,59 @@ class Claim:
 
 @dataclass(frozen=True)
 class ClaimEvidence:
-    """A claim paired with the verdict on whether public GitHub backs it up."""
+    """A claim paired with an LLM-graded verdict against real public code.
+
+    ``verdict`` is the honest three-way grade (see ``Verdict``); ``cited_files``
+    are the specific repo files the verifier pointed to when backing the claim
+    (empty unless ``verdict == "backed"``). ``matching_repos`` names the repos
+    those files live in. ``supported`` stays as a convenience alias for a
+    ``backed`` verdict so existing consumers keep working.
+    """
 
     claim: Claim
-    supported: bool
+    verdict: Verdict
     matching_repos: tuple[str, ...]
+    cited_files: tuple[str, ...]
     rationale: str
+
+    @property
+    def supported(self) -> bool:
+        """True only when public code backs the claim (verdict == ``backed``)."""
+        return self.verdict == "backed"
 
 
 @dataclass(frozen=True)
 class GapReport:
-    """The result of cross-referencing resume claims against GitHub reality.
+    """The result of grading resume claims against real public code.
 
-    The empty-GitHub case (our real target user) is represented naturally: every
-    claim lands in ``unsupported`` and ``github_is_empty`` is ``True``. Consumers
-    should frame that as the gap to close, never as "nothing found".
+    Claims are bucketed by verdict. The empty-GitHub case (our real target user)
+    is represented naturally: with no public repos every claim lands in
+    ``not_shown`` and ``github_is_empty`` is ``True``. Consumers should frame that
+    as the gap to close, never as "nothing found". ``supported``/``unsupported``
+    are convenience views over the buckets so the ranking in
+    ``core/suggestions.py`` and the cache fingerprint keep working unchanged.
     """
 
     profile_login: str
-    supported: tuple[ClaimEvidence, ...]
-    unsupported: tuple[ClaimEvidence, ...]
+    backed: tuple[ClaimEvidence, ...]
+    not_shown: tuple[ClaimEvidence, ...]
+    not_verifiable: tuple[ClaimEvidence, ...]
     github_is_empty: bool
+
+    @property
+    def supported(self) -> tuple[ClaimEvidence, ...]:
+        """Claims public code backs up (the ``backed`` bucket)."""
+        return self.backed
+
+    @property
+    def unsupported(self) -> tuple[ClaimEvidence, ...]:
+        """Claims public code does not back up (gaps + unprovable claims)."""
+        return self.not_shown + self.not_verifiable
 
     @property
     def total_claims(self) -> int:
         """How many claims were extracted and evaluated."""
-        return len(self.supported) + len(self.unsupported)
+        return len(self.backed) + len(self.not_shown) + len(self.not_verifiable)
 
 
 @dataclass(frozen=True)

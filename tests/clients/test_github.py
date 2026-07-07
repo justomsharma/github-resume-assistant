@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 import pytest
@@ -12,7 +13,14 @@ from resume_assistant.clients.github import (
     GitHubError,
     RateLimitError,
     UserNotFoundError,
+    _parse_go_mod,
+    _parse_package_json,
+    _parse_pyproject,
+    _parse_requirements,
+    _select_notable_paths,
+    _truncate_readme,
 )
+from resume_assistant.core.models import Profile, Repo
 
 _API = "https://api.github.com"
 
@@ -226,3 +234,192 @@ def test_token_sets_authorization_header(user_json: dict[str, Any]) -> None:
     GitHubClient(token="secret-token").fetch_profile("octocat")
 
     assert responses.calls[0].request.headers["Authorization"] == "Bearer secret-token"
+
+
+# --- fetch_repo_evidence (v2.1) ----------------------------------------------
+
+
+def _b64(text: str) -> str:
+    return base64.b64encode(text.encode("utf-8")).decode("ascii")
+
+
+def _repo(name: str, *, is_fork: bool = False, branch: str = "main") -> Repo:
+    return Repo(
+        name=name,
+        description=None,
+        url=f"https://github.com/octocat/{name}",
+        stars=0,
+        primary_language="Go",
+        created_at=None,
+        last_pushed_at="2024-06-01T00:00:00Z",
+        is_fork=is_fork,
+        default_branch=branch,
+    )
+
+
+def _profile(repos: list[Repo]) -> Profile:
+    return Profile("octocat", None, None, "https://github.com/octocat", len(repos), 0, repos=repos)
+
+
+def _register_evidence(
+    name: str,
+    *,
+    tree: list[dict[str, Any]],
+    files: dict[str, str] | None = None,
+    languages: dict[str, int] | None = None,
+    readme: str | None = None,
+    branch: str = "main",
+) -> None:
+    """Register the tree/contents/languages/readme responses one repo needs."""
+    base = f"{_API}/repos/octocat/{name}"
+    responses.add(responses.GET, f"{base}/git/trees/{branch}", json={"tree": tree}, status=200)
+    for path, content in (files or {}).items():
+        responses.add(
+            responses.GET,
+            f"{base}/contents/{path}",
+            json={"content": _b64(content), "encoding": "base64"},
+            status=200,
+        )
+    responses.add(responses.GET, f"{base}/languages", json=languages or {}, status=200)
+    if readme is None:
+        responses.add(responses.GET, f"{base}/readme", json={"message": "Not Found"}, status=404)
+    else:
+        responses.add(
+            responses.GET,
+            f"{base}/readme",
+            json={"content": _b64(readme), "encoding": "base64"},
+            status=200,
+        )
+
+
+@responses.activate
+def test_fetch_repo_evidence_happy_path() -> None:
+    _register_evidence(
+        "go-cache",
+        tree=[
+            {"type": "blob", "path": "Dockerfile"},
+            {"type": "blob", "path": "requirements.txt"},
+            {"type": "blob", "path": "src/cache.py"},
+            {"type": "blob", "path": "tests/test_cache.py"},
+            {"type": "blob", "path": "README.md"},
+            {"type": "tree", "path": "src"},  # non-blob entries are ignored
+        ],
+        files={"requirements.txt": "flask==2.0\nredis>=4\n# a comment\n-e .\n"},
+        languages={"Python": 8000, "Shell": 200},
+        readme="# go-cache\nA distributed cache.",
+    )
+
+    evidence = GitHubClient().fetch_repo_evidence(_profile([_repo("go-cache")]))
+
+    assert len(evidence) == 1
+    ev = evidence[0]
+    assert ev.repo_name == "go-cache"
+    assert ev.dependencies == ("flask", "redis")  # versions/comments/-e stripped
+    assert ev.file_count == 5  # only blob paths counted
+    assert "Dockerfile" in ev.notable_paths
+    assert "src/cache.py" in ev.notable_paths and "tests/test_cache.py" in ev.notable_paths
+    assert ev.language_breakdown == (("Python", 8000), ("Shell", 200))  # largest first
+    assert ev.readme_excerpt is not None and "distributed cache" in ev.readme_excerpt
+    assert ev.pushed_at == "2024-06-01T00:00:00Z"
+
+
+@responses.activate
+def test_fetch_repo_evidence_skips_forks() -> None:
+    _register_evidence("mine", tree=[{"type": "blob", "path": "main.go"}], languages={"Go": 10})
+
+    evidence = GitHubClient().fetch_repo_evidence(
+        _profile([_repo("mine"), _repo("a-fork", is_fork=True)])
+    )
+
+    assert [e.repo_name for e in evidence] == ["mine"]  # the fork contributes no evidence
+
+
+@responses.activate
+def test_fetch_repo_evidence_missing_readme_and_manifests() -> None:
+    _register_evidence(
+        "bare",
+        tree=[{"type": "blob", "path": "notes.txt"}],
+        languages={},
+        readme=None,  # 404 → absent, not an error
+    )
+
+    evidence = GitHubClient().fetch_repo_evidence(_profile([_repo("bare")]))
+
+    assert evidence[0].dependencies == ()  # no known manifest present
+    assert evidence[0].readme_excerpt is None
+    assert evidence[0].file_count == 1
+
+
+@responses.activate
+def test_fetch_repo_evidence_empty_repo_tree_missing() -> None:
+    base = f"{_API}/repos/octocat/empty"
+    responses.add(responses.GET, f"{base}/git/trees/main", json={"message": "empty"}, status=404)
+    responses.add(responses.GET, f"{base}/languages", json={}, status=200)
+    responses.add(responses.GET, f"{base}/readme", json={"message": "Not Found"}, status=404)
+
+    evidence = GitHubClient().fetch_repo_evidence(_profile([_repo("empty")]))
+
+    assert evidence[0].file_count == 0  # empty/absent tree degrades to no paths
+    assert evidence[0].notable_paths == ()
+
+
+# --- manifest + path parsers (unit) ------------------------------------------
+
+
+def test_parse_requirements_strips_versions_and_comments() -> None:
+    content = "flask==2.0.1\nrequests>=2\n# comment\n\n-r other.txt\nhttpx[http2]~=0.27\n"
+    assert _parse_requirements(content) == ["flask", "requests", "httpx"]
+
+
+def test_parse_pyproject_reads_pep621_and_poetry() -> None:
+    pep621 = '[project]\ndependencies = ["flask>=2", "requests"]\n'
+    assert _parse_pyproject(pep621) == ["flask", "requests"]
+
+    poetry = '[tool.poetry.dependencies]\npython = "^3.11"\nfastapi = "^0.1"\n'
+    assert _parse_pyproject(poetry) == ["fastapi"]  # python itself is excluded
+
+
+def test_parse_pyproject_malformed_returns_empty() -> None:
+    assert _parse_pyproject("not = = valid toml [[[") == []
+
+
+def test_parse_package_json_reads_both_dependency_sections() -> None:
+    content = '{"dependencies": {"react": "^18"}, "devDependencies": {"jest": "^29"}}'
+    assert _parse_package_json(content) == ["react", "jest"]
+
+
+def test_parse_package_json_malformed_returns_empty() -> None:
+    assert _parse_package_json("{not json") == []
+
+
+def test_parse_go_mod_reads_single_and_block_requires() -> None:
+    content = (
+        "module example.com/m\n\n"
+        "require github.com/gin-gonic/gin v1.9.1\n\n"
+        "require (\n\tgithub.com/redis/go-redis/v9 v9.0.0\n\t// a comment\n"
+        "\tgolang.org/x/sync v0.3.0\n)\n"
+    )
+    assert _parse_go_mod(content) == [
+        "github.com/gin-gonic/gin",
+        "github.com/redis/go-redis/v9",
+        "golang.org/x/sync",
+    ]
+
+
+def test_truncate_readme_marks_the_cut() -> None:
+    long_text = "x" * 5000
+    trimmed = _truncate_readme(long_text)
+    assert len(trimmed) < 5000
+    assert trimmed.endswith("(truncated)")
+
+    short = "# short readme"
+    assert _truncate_readme(short) == short  # under the cap, untouched
+
+
+def test_select_notable_paths_filters_and_caps() -> None:
+    paths = ["Dockerfile", ".github/workflows/ci.yml", "src/app.py", "random.txt", "LICENSE"]
+    notable = _select_notable_paths(paths)
+    assert "Dockerfile" in notable
+    assert ".github/workflows/ci.yml" in notable
+    assert "src/app.py" in notable
+    assert "random.txt" not in notable and "LICENSE" not in notable

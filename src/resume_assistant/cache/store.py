@@ -16,9 +16,12 @@ from typing import Protocol
 
 from resume_assistant.core.models import (
     Claim,
+    ClaimEvidence,
     GapReport,
     Profile,
+    RepoEvidence,
     Suggestion,
+    Verdict,
 )
 
 _CREATE_TABLE = """
@@ -142,6 +145,178 @@ class CachingSuggestionGenerator:
         )
         digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
         return f"suggestions:{self._model}:{digest}"
+
+
+class RepoEvidenceFetcherProtocol(Protocol):
+    """Structural stand-in: anything that fetches code-level evidence for a profile."""
+
+    def fetch_repo_evidence(self, profile: Profile) -> list[RepoEvidence]: ...
+
+
+class CachingRepoEvidenceFetcher:
+    """Wrap an evidence fetcher so unchanged repos don't re-hit the GitHub API.
+
+    Evidence is keyed on a fingerprint of each repo's ``(name, pushed_at)``: it
+    only changes when a repo is pushed to, so a re-run over the same profile
+    returns cached evidence with no GitHub calls. The key is model-independent —
+    this is GitHub data, not model output. Satisfies
+    ``core.analysis``'s evidence-fetch dependency structurally.
+    """
+
+    def __init__(self, inner: RepoEvidenceFetcherProtocol, cache: SqliteCache) -> None:
+        self._inner = inner
+        self._cache = cache
+
+    def fetch_repo_evidence(self, profile: Profile) -> list[RepoEvidence]:
+        """Return cached evidence for this profile's repos, or fetch and cache it."""
+        key = self._key(profile)
+        cached = self._cache.get(key)
+        if cached is not None:
+            return _deserialize_evidence(cached)
+
+        evidence = self._inner.fetch_repo_evidence(profile)
+        self._cache.set(key, _serialize_evidence(evidence))
+        return evidence
+
+    def _key(self, profile: Profile) -> str:
+        """Cache key: a stable hash of each non-fork repo's name + last-push time."""
+        fingerprint = json.dumps(
+            {
+                "login": profile.login,
+                "repos": sorted([r.name, r.last_pushed_at] for r in profile.repos if not r.is_fork),
+            },
+            sort_keys=True,
+        )
+        digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
+        return f"evidence:{digest}"
+
+
+class ClaimVerifierProtocol(Protocol):
+    """Structural stand-in: anything that grades claims against repo evidence."""
+
+    def verify_claims(
+        self, claims: list[Claim], evidence: list[RepoEvidence]
+    ) -> list[ClaimEvidence]: ...
+
+
+class CachingClaimVerifier:
+    """Wrap a claim verifier so identical (claims, evidence) don't re-hit the paid API.
+
+    Verdicts are keyed on the model id plus a hash of the claim texts and the
+    evidence fingerprint (repo names + push times): the same claims graded against
+    the same code return cached verdicts with no Anthropic call. Satisfies
+    ``core.analysis.ClaimVerifier`` structurally.
+    """
+
+    def __init__(self, inner: ClaimVerifierProtocol, cache: SqliteCache, model: str) -> None:
+        self._inner = inner
+        self._cache = cache
+        self._model = model
+
+    def verify_claims(
+        self, claims: list[Claim], evidence: list[RepoEvidence]
+    ) -> list[ClaimEvidence]:
+        """Return cached verdicts for these claims + evidence, or verify and cache them."""
+        key = self._key(claims, evidence)
+        cached = self._cache.get(key)
+        if cached is not None:
+            return _deserialize_claim_evidence(cached)
+
+        verdicts = self._inner.verify_claims(claims, evidence)
+        self._cache.set(key, _serialize_claim_evidence(verdicts))
+        return verdicts
+
+    def _key(self, claims: list[Claim], evidence: list[RepoEvidence]) -> str:
+        """Cache key: model id + a stable hash of the claim texts and evidence identity."""
+        fingerprint = json.dumps(
+            {
+                "claims": [c.text for c in claims],
+                "evidence": sorted([e.repo_name, e.pushed_at] for e in evidence),
+            },
+            sort_keys=True,
+        )
+        digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
+        return f"verdicts:{self._model}:{digest}"
+
+
+def _serialize_evidence(evidence: list[RepoEvidence]) -> str:
+    """Serialize repo evidence to a JSON string for storage."""
+    return json.dumps(
+        [
+            {
+                "repo_name": e.repo_name,
+                "primary_language": e.primary_language,
+                "language_breakdown": [list(pair) for pair in e.language_breakdown],
+                "dependencies": list(e.dependencies),
+                "notable_paths": list(e.notable_paths),
+                "file_count": e.file_count,
+                "readme_excerpt": e.readme_excerpt,
+                "pushed_at": e.pushed_at,
+            }
+            for e in evidence
+        ]
+    )
+
+
+def _deserialize_evidence(raw: str) -> list[RepoEvidence]:
+    """Rebuild RepoEvidence models from a stored JSON string."""
+    return [
+        RepoEvidence(
+            repo_name=item["repo_name"],
+            primary_language=item.get("primary_language"),
+            language_breakdown=tuple(
+                (str(lang), int(count)) for lang, count in item.get("language_breakdown", [])
+            ),
+            dependencies=tuple(item.get("dependencies", [])),
+            notable_paths=tuple(item.get("notable_paths", [])),
+            file_count=item.get("file_count", 0),
+            readme_excerpt=item.get("readme_excerpt"),
+            pushed_at=item.get("pushed_at"),
+        )
+        for item in json.loads(raw)
+    ]
+
+
+def _serialize_claim_evidence(evidence: list[ClaimEvidence]) -> str:
+    """Serialize graded claim evidence to a JSON string for storage."""
+    return json.dumps(
+        [
+            {
+                "claim": {
+                    "text": e.claim.text,
+                    "skills": list(e.claim.skills),
+                    "category": e.claim.category,
+                },
+                "verdict": e.verdict,
+                "matching_repos": list(e.matching_repos),
+                "cited_files": list(e.cited_files),
+                "rationale": e.rationale,
+            }
+            for e in evidence
+        ]
+    )
+
+
+def _deserialize_claim_evidence(raw: str) -> list[ClaimEvidence]:
+    """Rebuild ClaimEvidence models from a stored JSON string."""
+    result: list[ClaimEvidence] = []
+    for item in json.loads(raw):
+        claim_data = item["claim"]
+        verdict: Verdict = item["verdict"]
+        result.append(
+            ClaimEvidence(
+                claim=Claim(
+                    text=claim_data["text"],
+                    skills=tuple(claim_data.get("skills", [])),
+                    category=claim_data.get("category", "other"),
+                ),
+                verdict=verdict,
+                matching_repos=tuple(item.get("matching_repos", [])),
+                cited_files=tuple(item.get("cited_files", [])),
+                rationale=item.get("rationale", ""),
+            )
+        )
+    return result
 
 
 def _serialize_claims(claims: list[Claim]) -> str:

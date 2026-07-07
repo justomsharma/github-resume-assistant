@@ -84,9 +84,38 @@ To reach real users you need a no-install surface.
 - ⬜ MCP server becomes a thin adapter over `core/` (for you + portfolio)
 - ✅ Add a **simple web app** over the same `core/` (for job-seekers, no install)
 - ✅ Web app: paste resume + enter GitHub username → gap report + build plan
-- ⬜ Deploy (Railway / Render free tier)
+- ⬜ Deploy (Railway / Render free tier) — **blocked behind v2.1**: the advice
+  must be genuinely good on real code before we put it in front of users, and the
+  v2.0 "backed" verdict was a shallow token match (PRODUCT.md moat).
 
 **Deliverable:** same engine, two front doors — MCP for builders, web for everyone.
+
+---
+
+## v2.1 — Grounded match fidelity (gates the v2.0 deploy)
+
+**Goal:** make the "backed" verdict honest. The v2.0 matcher marked a claim
+"backed" if a skill token merely appeared in a repo's name, description, or
+primary language — so "built a distributed cache in Go" was "backed" by any repo
+mentioning "go". That false positive undercuts the whole grounding moat
+(PRODUCT.md). This is a quality item, not new surface — it gates the v2.0 deploy.
+
+- 🔨 Fetch real repo evidence for every non-fork repo: dependency manifests
+  (parsed), recursive file tree, language breakdown, and README (bounded to a
+  char budget) — reusing the existing retry/rate-limit client
+- 🔨 Replace the token matcher with an **LLM-graded verdict** that cites specific
+  files and returns one of three honest verdicts per claim:
+  `backed` / `not_shown` / `not_verifiable` (the last for claims public code
+  structurally can't prove — enterprise usage, latency, "300+/day", cost %)
+- 🔨 Scale to "all repos" safely: per-repo char budget + batched verification
+  under a token budget with merged verdicts; cache evidence per repo `pushed_at`
+  and verdicts per model + claims + evidence fingerprint
+- 🔨 Three honest verdict labels across MCP + web; empty-GitHub stays the main
+  case (every claim `not_shown`, verifier skipped)
+
+**Deliverable:** on your real resume + GitHub, "backed" verdicts cite real files
+and are true; unprovable claims read "not verifiable from public code"; genuine
+gaps read "not shown yet". Then the v2.0 deploy is unblocked.
 
 ---
 

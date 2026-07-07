@@ -8,15 +8,17 @@ from resume_assistant.core.models import (
     GapReport,
     Profile,
     Suggestion,
+    Verdict,
 )
 from resume_assistant.core.suggestions import build_project_plan
 
 
-def _evidence(text: str, supported: bool) -> ClaimEvidence:
+def _evidence(text: str, verdict: Verdict) -> ClaimEvidence:
     return ClaimEvidence(
         claim=Claim(text=text),
-        supported=supported,
+        verdict=verdict,
         matching_repos=(),
+        cited_files=(),
         rationale="",
     )
 
@@ -49,8 +51,9 @@ class FakeSuggester:
 def test_gaps_ranked_before_supported_claims() -> None:
     report = GapReport(
         profile_login="octocat",
-        supported=(_evidence("Backed claim", supported=True),),
-        unsupported=(_evidence("Gap claim", supported=False),),
+        backed=(_evidence("Backed claim", "backed"),),
+        not_shown=(_evidence("Gap claim", "not_shown"),),
+        not_verifiable=(),
         github_is_empty=False,
     )
     # Candidate order deliberately puts the supported-claim project first.
@@ -67,8 +70,9 @@ def test_gaps_ranked_before_supported_claims() -> None:
 def test_within_gaps_quicker_wins_come_first() -> None:
     report = GapReport(
         profile_login="octocat",
-        supported=(),
-        unsupported=(_evidence("Gap claim", supported=False),),
+        backed=(),
+        not_shown=(_evidence("Gap claim", "not_shown"),),
+        not_verifiable=(),
         github_is_empty=False,
     )
     candidates = [
@@ -84,8 +88,9 @@ def test_within_gaps_quicker_wins_come_first() -> None:
 def test_stable_order_for_equal_rank() -> None:
     report = GapReport(
         profile_login="octocat",
-        supported=(),
-        unsupported=(_evidence("Gap claim", supported=False),),
+        backed=(),
+        not_shown=(_evidence("Gap claim", "not_shown"),),
+        not_verifiable=(),
         github_is_empty=False,
     )
     candidates = [
@@ -102,11 +107,12 @@ def test_empty_github_with_claims_still_yields_a_plan(empty_profile: Profile) ->
     """Our real user: empty GitHub, but claims exist → buildable plan, not nothing."""
     report = GapReport(
         profile_login="newgrad",
-        supported=(),
-        unsupported=(
-            _evidence("Built a cache in Go", supported=False),
-            _evidence("Proficient in React", supported=False),
+        backed=(),
+        not_shown=(
+            _evidence("Built a cache in Go", "not_shown"),
+            _evidence("Proficient in React", "not_shown"),
         ),
+        not_verifiable=(),
         github_is_empty=True,
     )
     candidates = [
@@ -124,8 +130,9 @@ def test_empty_github_with_claims_still_yields_a_plan(empty_profile: Profile) ->
 def test_no_candidates_yields_empty_plan(empty_profile: Profile) -> None:
     report = GapReport(
         profile_login="newgrad",
-        supported=(),
-        unsupported=(),
+        backed=(),
+        not_shown=(),
+        not_verifiable=(),
         github_is_empty=True,
     )
 

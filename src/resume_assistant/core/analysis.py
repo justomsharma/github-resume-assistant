@@ -1,22 +1,26 @@
 """Turn a resume + GitHub profile into a gap report (pure logic).
 
 This module never imports ``mcp`` and never hits the network directly
-(docs/ARCHITECTURE.md, rule 1). It gets claims from a claim extractor (the
-Anthropic client, or any object satisfying ``ClaimExtractor``) and then does the
-claim→repo matching itself, deterministically, so the matching is testable
-offline. The empty-GitHub case is the primary path: with no public repos, every
-claim is unsupported and ``github_is_empty`` is set — the gap to close, not a
-dead end.
+(docs/ARCHITECTURE.md, rule 1). It gets claims from a claim extractor and graded
+verdicts from a claim verifier (both implemented by the Anthropic client, or any
+object satisfying the protocols), then buckets the verdicts itself — pure,
+deterministic grouping that's testable by mocking the verifier. The empty-GitHub
+case is the primary path: with no public repos there's no code to grade against,
+so every claim is ``not_shown`` (the gap to close) and the verifier is never
+called.
 """
 
 from __future__ import annotations
 
-import re
 from typing import Protocol
 
-from resume_assistant.core.models import Claim, ClaimEvidence, GapReport, Profile, Repo
-
-_TOKEN = re.compile(r"[a-z0-9+#.]+")
+from resume_assistant.core.models import (
+    Claim,
+    ClaimEvidence,
+    GapReport,
+    Profile,
+    RepoEvidence,
+)
 
 
 class ClaimExtractor(Protocol):
@@ -25,70 +29,55 @@ class ClaimExtractor(Protocol):
     def extract_claims(self, resume_text: str) -> list[Claim]: ...
 
 
-def build_gap_report(resume_text: str, profile: Profile, extractor: ClaimExtractor) -> GapReport:
-    """Cross-reference the resume's claims against the profile's public repos."""
+class ClaimVerifier(Protocol):
+    """Anything that can grade claims against real code (implemented by AnthropicClient)."""
+
+    def verify_claims(
+        self, claims: list[Claim], evidence: list[RepoEvidence]
+    ) -> list[ClaimEvidence]: ...
+
+
+def build_gap_report(
+    resume_text: str,
+    profile: Profile,
+    evidence: list[RepoEvidence],
+    extractor: ClaimExtractor,
+    verifier: ClaimVerifier,
+) -> GapReport:
+    """Grade the resume's claims against real repo evidence and bucket the verdicts."""
     claims = extractor.extract_claims(resume_text)
     github_is_empty = not profile.has_public_repos
 
-    supported: list[ClaimEvidence] = []
-    unsupported: list[ClaimEvidence] = []
-    for claim in claims:
-        evidence = _evaluate_claim(claim, profile.repos)
-        (supported if evidence.supported else unsupported).append(evidence)
+    if github_is_empty or not evidence:
+        # No public code to grade against: every claim is a gap to close, not a
+        # mark against the person. Skip the verifier — there's nothing to cite.
+        graded = [_not_shown(claim) for claim in claims]
+    else:
+        graded = verifier.verify_claims(claims, evidence)
 
+    return _bucket(profile.login, graded, github_is_empty)
+
+
+def _bucket(login: str, graded: list[ClaimEvidence], github_is_empty: bool) -> GapReport:
+    """Partition graded claims into the three verdict buckets."""
+    backed = tuple(e for e in graded if e.verdict == "backed")
+    not_shown = tuple(e for e in graded if e.verdict == "not_shown")
+    not_verifiable = tuple(e for e in graded if e.verdict == "not_verifiable")
     return GapReport(
-        profile_login=profile.login,
-        supported=tuple(supported),
-        unsupported=tuple(unsupported),
+        profile_login=login,
+        backed=backed,
+        not_shown=not_shown,
+        not_verifiable=not_verifiable,
         github_is_empty=github_is_empty,
     )
 
 
-def _evaluate_claim(claim: Claim, repos: list[Repo]) -> ClaimEvidence:
-    """Decide whether any public repo backs up ``claim`` via its named skills.
-
-    A claim is supported when at least one of its skills appears in a non-fork
-    repo's primary language, name, or description. Claims with no extractable
-    skills can't be verified against repo metadata, so they stay unsupported —
-    surfaced as a gap rather than silently assumed true.
-    """
-    matching: list[str] = []
-    for repo in repos:
-        if repo.is_fork:
-            continue
-        if _skills_match_repo(claim.skills, repo):
-            matching.append(repo.name)
-
-    if matching:
-        skills = ", ".join(claim.skills)
-        rationale = f"Backed by public repo(s) using {skills}: {', '.join(matching)}."
-    elif not claim.skills:
-        rationale = "No specific technology named, so it can't be verified against your repos."
-    else:
-        rationale = "No public repo demonstrates this — a gap to close."
-
+def _not_shown(claim: Claim) -> ClaimEvidence:
+    """A claim with no public code to grade against — a gap to close, not a failure."""
     return ClaimEvidence(
         claim=claim,
-        supported=bool(matching),
-        matching_repos=tuple(matching),
-        rationale=rationale,
+        verdict="not_shown",
+        matching_repos=(),
+        cited_files=(),
+        rationale="No public repositories yet, so nothing public backs this — a gap to close.",
     )
-
-
-def _skills_match_repo(skills: tuple[str, ...], repo: Repo) -> bool:
-    """True if any skill matches a whole token in the repo's language, name, or description.
-
-    Token-based, not substring: the skill "go" matches a repo whose language is
-    "Go" or whose name is "go-cache", but not "django-blog" or "mongo-client"
-    (which merely contain the letters "go"). Avoids false "supported" verdicts.
-    """
-    if not skills:
-        return False
-    tokens = _repo_tokens(repo)
-    return any(skill in tokens for skill in skills if skill)
-
-
-def _repo_tokens(repo: Repo) -> set[str]:
-    """Lowercased word tokens from a repo's language, name, and description."""
-    text = " ".join(part for part in (repo.primary_language, repo.name, repo.description) if part)
-    return set(_TOKEN.findall(text.lower()))

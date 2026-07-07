@@ -32,12 +32,18 @@ def client() -> FlaskClient:
 
 
 def _result(
-    profile: Profile, empty: bool, supported=(), unsupported=(), suggestions=()
+    profile: Profile,
+    empty: bool,
+    backed=(),
+    not_shown=(),
+    not_verifiable=(),
+    suggestions=(),
 ) -> AnalysisResult:
     report = GapReport(
         profile_login=profile.login,
-        supported=tuple(supported),
-        unsupported=tuple(unsupported),
+        backed=tuple(backed),
+        not_shown=tuple(not_shown),
+        not_verifiable=tuple(not_verifiable),
         github_is_empty=empty,
     )
     plan = ProjectPlan(
@@ -59,9 +65,13 @@ def test_has_github_results_show_meter_and_plan(
     mocker: MockerFixture, client: FlaskClient, profile_with_repos: Profile
 ) -> None:
     claim = Claim(text="Built a distributed cache in Go", skills=("go",))
-    supported = (ClaimEvidence(claim, True, ("go-cache",), "Backed by public repo go-cache."),)
+    backed = (
+        ClaimEvidence(
+            claim, "backed", ("go-cache",), ("go-cache/src/cache.go",), "LRU cache in cache.go."
+        ),
+    )
     react = Claim(text="Proficient in React", skills=("react",))
-    unsupported = (ClaimEvidence(react, False, (), "No public repo names React."),)
+    not_shown = (ClaimEvidence(react, "not_shown", (), (), "No public repo shows React."),)
     suggestion = Suggestion(
         "react-dashboard",
         "A live dashboard.",
@@ -70,7 +80,7 @@ def test_has_github_results_show_meter_and_plan(
         "a weekend",
         "auth",
     )
-    outcome = _result(profile_with_repos, False, supported, unsupported, (suggestion,))
+    outcome = _result(profile_with_repos, False, backed, not_shown, (), (suggestion,))
     mocker.patch.object(webapp, "run_analysis", return_value=outcome)
 
     resp = client.post("/analyze", data={"resume_text": "x", "username": "octocat"})
@@ -81,7 +91,8 @@ def test_has_github_results_show_meter_and_plan(
     assert "1 of 2 claims backed" in body  # credibility meter callout
     assert "backed" in body and "not shown yet" in body
     assert "react-dashboard" in body
-    assert "signal, not proof" in body  # honest labeling
+    assert "go-cache/src/cache.go" in body  # backed claim cites the specific file
+    assert "graded against your real repo code" in body  # honest, grounded labeling
 
 
 def test_empty_github_is_the_main_case(
@@ -89,7 +100,7 @@ def test_empty_github_is_the_main_case(
 ) -> None:
     """The empty-GitHub path renders a build plan, not 'nothing found'."""
     claim = Claim(text="Built a distributed cache in Go", skills=("go",))
-    unsupported = (ClaimEvidence(claim, False, (), "No public repo demonstrates this."),)
+    not_shown = (ClaimEvidence(claim, "not_shown", (), (), "No public repo demonstrates this."),)
     suggestion = Suggestion(
         "go-lru-cache",
         "A concurrent LRU cache.",
@@ -98,7 +109,7 @@ def test_empty_github_is_the_main_case(
         "a weekend",
         "real distributed consensus",
     )
-    outcome = _result(empty_profile, True, (), unsupported, (suggestion,))
+    outcome = _result(empty_profile, True, (), not_shown, (), (suggestion,))
     mocker.patch.object(webapp, "run_analysis", return_value=outcome)
 
     resp = client.post("/analyze", data={"resume_text": "x", "username": "newgrad"})
