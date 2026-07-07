@@ -1,0 +1,33 @@
+# Keep the build context small and never ship secrets or local cruft.
+.git
+.gitignore
+.venv
+venv
+.env
+.env.*
+
+# Python bytecode / build artifacts
+__pycache__
+*.pyc
+*.egg-info
+build
+dist
+
+# Tooling caches
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Not needed at runtime
+.github
+.claude
+tests
+docs
+
+# Local databases / caches
+*.db
+*.sqlite
+*.sqlite3
+.cache
