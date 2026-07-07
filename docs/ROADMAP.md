@@ -12,11 +12,11 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started
 
 **Goal:** prove the MCP plumbing works end-to-end with one real tool.
 
-- ⬜ Python project initialized with the `mcp` library
-- ⬜ MCP server runs locally over stdio
-- ⬜ `fetch_github_repos(username)` implemented against the real GitHub API
-- ⬜ Registered and callable from **Claude Desktop**
-- ⬜ Returns: profile summary, repo list, stars, primary languages, last-push dates
+- ✅ Python project initialized with the `mcp` library
+- ✅ MCP server runs locally over stdio
+- ✅ `fetch_github_repos(username)` implemented against the real GitHub API
+- ✅ Registered and callable from **Claude Desktop**
+- ✅ Returns: profile summary, repo list, stars, primary languages, last-push dates
 
 **Deliverable:** In Claude Desktop, "show me my GitHub repos" returns your real data.
 
