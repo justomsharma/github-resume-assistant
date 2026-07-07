@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from resume_assistant.core.analysis import build_gap_report
-from resume_assistant.core.models import Claim, Profile
+from resume_assistant.core.models import Claim, Profile, Repo
 
 
 class FakeExtractor:
@@ -73,6 +73,36 @@ def test_no_claims_returns_empty_report(profile_with_repos: Profile) -> None:
     assert report.total_claims == 0
     assert report.supported == ()
     assert report.unsupported == ()
+
+
+def test_skill_matches_whole_token_not_substring() -> None:
+    # "go" must not be "backed" by a django-blog repo just because it contains "go".
+    profile = Profile(
+        login="dev",
+        name=None,
+        bio=None,
+        profile_url="https://github.com/dev",
+        public_repo_count=1,
+        followers=0,
+        repos=[
+            Repo(
+                name="django-blog",
+                description="A mongo-backed blog",
+                url="https://github.com/dev/django-blog",
+                stars=1,
+                primary_language="Python",
+                created_at=None,
+                last_pushed_at=None,
+                is_fork=False,
+            )
+        ],
+    )
+    claims = [Claim(text="Built services in Go", skills=("go",), category="project")]
+
+    report = build_gap_report("resume", profile, FakeExtractor(claims))
+
+    assert len(report.unsupported) == 1  # no false-positive substring match
+    assert report.unsupported[0].matching_repos == ()
 
 
 def test_claim_without_skills_is_unsupported(profile_with_repos: Profile) -> None:

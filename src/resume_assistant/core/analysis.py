@@ -11,9 +11,12 @@ dead end.
 
 from __future__ import annotations
 
+import re
 from typing import Protocol
 
 from resume_assistant.core.models import Claim, ClaimEvidence, GapReport, Profile, Repo
+
+_TOKEN = re.compile(r"[a-z0-9+#.]+")
 
 
 class ClaimExtractor(Protocol):
@@ -75,12 +78,21 @@ def _evaluate_claim(claim: Claim, repos: list[Repo]) -> ClaimEvidence:
 
 
 def _skills_match_repo(skills: tuple[str, ...], repo: Repo) -> bool:
-    """True if any skill token appears in the repo's language, name, or description."""
+    """True if any skill matches a whole token in the repo's language, name, or description.
+
+    Token-based, not substring: the skill "go" matches a repo whose language is
+    "Go" or whose name is "go-cache", but not "django-blog" or "mongo-client"
+    (which merely contain the letters "go"). Avoids false "supported" verdicts.
+    """
     if not skills:
         return False
-    haystack = " ".join(
-        part.lower()
-        for part in (repo.primary_language, repo.name, repo.description)
-        if part
+    tokens = _repo_tokens(repo)
+    return any(skill in tokens for skill in skills if skill)
+
+
+def _repo_tokens(repo: Repo) -> set[str]:
+    """Lowercased word tokens from a repo's language, name, and description."""
+    text = " ".join(
+        part for part in (repo.primary_language, repo.name, repo.description) if part
     )
-    return any(skill in haystack for skill in skills if skill)
+    return set(_TOKEN.findall(text.lower()))
