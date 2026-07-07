@@ -43,11 +43,11 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started
 
 **Goal:** the reason the product exists.
 
-- ⬜ `suggest_projects()` implemented
-- ⬜ Input: the gap report + GitHub reality + resume claims
-- ⬜ Output: a **ranked 30-day plan** of specific, shippable projects
-- ⬜ Each suggestion tied to a concrete resume claim it would prove
-- ⬜ Each suggestion sized ("a weekend", "a week") and scoped (what to skip)
+- ✅ `suggest_projects()` implemented
+- ✅ Input: the gap report + GitHub reality + resume claims
+- ✅ Output: a **ranked 30-day plan** of specific, shippable projects
+- ✅ Each suggestion tied to a concrete resume claim it would prove
+- ✅ Each suggestion sized ("a weekend", "a week") and scoped (what to skip)
 
 **Deliverable:** "Here are 3 things to build this month to make your resume credible."
 

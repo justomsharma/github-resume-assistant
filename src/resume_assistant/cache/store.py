@@ -14,7 +14,12 @@ import sqlite3
 from contextlib import closing
 from typing import Protocol
 
-from resume_assistant.core.models import Claim
+from resume_assistant.core.models import (
+    Claim,
+    GapReport,
+    Profile,
+    Suggestion,
+)
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS cache (
@@ -92,6 +97,59 @@ class CachingClaimExtractor:
         return f"claims:{self._model}:{digest}"
 
 
+class SuggestionGeneratorProtocol(Protocol):
+    """Structural stand-in: anything that proposes candidate projects for a gap report."""
+
+    def generate_suggestions(
+        self, gap_report: GapReport, profile: Profile
+    ) -> list[Suggestion]: ...
+
+
+class CachingSuggestionGenerator:
+    """Wrap a suggestion generator so identical inputs don't re-hit the paid API.
+
+    Suggestions are keyed on the model id plus a hash of the gap report's content
+    (login, empty flag, and the supported/unsupported claim texts): the same gap
+    report yields cached candidates with no Anthropic call. Ranking still happens
+    downstream in ``core/suggestions.py``, so cached candidates re-rank freely.
+    Satisfies ``core.suggestions.SuggestionGenerator`` structurally.
+    """
+
+    def __init__(
+        self, inner: SuggestionGeneratorProtocol, cache: SqliteCache, model: str
+    ) -> None:
+        self._inner = inner
+        self._cache = cache
+        self._model = model
+
+    def generate_suggestions(
+        self, gap_report: GapReport, profile: Profile
+    ) -> list[Suggestion]:
+        """Return cached candidates for this gap report, or generate and cache them."""
+        key = self._key(gap_report)
+        cached = self._cache.get(key)
+        if cached is not None:
+            return _deserialize_suggestions(cached)
+
+        suggestions = self._inner.generate_suggestions(gap_report, profile)
+        self._cache.set(key, _serialize_suggestions(suggestions))
+        return suggestions
+
+    def _key(self, gap_report: GapReport) -> str:
+        """Cache key: model id + a stable hash of the gap report's content."""
+        fingerprint = json.dumps(
+            {
+                "login": gap_report.profile_login,
+                "empty": gap_report.github_is_empty,
+                "supported": sorted(e.claim.text for e in gap_report.supported),
+                "unsupported": sorted(e.claim.text for e in gap_report.unsupported),
+            },
+            sort_keys=True,
+        )
+        digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
+        return f"suggestions:{self._model}:{digest}"
+
+
 def _serialize_claims(claims: list[Claim]) -> str:
     """Serialize claims to a JSON string for storage."""
     return json.dumps(
@@ -109,6 +167,38 @@ def _deserialize_claims(raw: str) -> list[Claim]:
             text=item["text"],
             skills=tuple(item.get("skills", [])),
             category=item.get("category", "other"),
+        )
+        for item in json.loads(raw)
+    ]
+
+
+def _serialize_suggestions(suggestions: list[Suggestion]) -> str:
+    """Serialize suggestions to a JSON string for storage."""
+    return json.dumps(
+        [
+            {
+                "title": s.title,
+                "what_to_build": s.what_to_build,
+                "proves_claim": s.proves_claim,
+                "skills": list(s.skills),
+                "size": s.size,
+                "skip": s.skip,
+            }
+            for s in suggestions
+        ]
+    )
+
+
+def _deserialize_suggestions(raw: str) -> list[Suggestion]:
+    """Rebuild Suggestion models from a stored JSON string."""
+    return [
+        Suggestion(
+            title=item["title"],
+            what_to_build=item["what_to_build"],
+            proves_claim=item.get("proves_claim", ""),
+            skills=tuple(item.get("skills", [])),
+            size=item.get("size", "a week"),
+            skip=item.get("skip", ""),
         )
         for item in json.loads(raw)
     ]

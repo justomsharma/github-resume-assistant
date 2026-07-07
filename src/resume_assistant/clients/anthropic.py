@@ -16,10 +16,11 @@ from typing import Any
 import anthropic
 from anthropic.types import MessageParam
 
-from resume_assistant.core.models import Claim
+from resume_assistant.core.models import Claim, GapReport, Profile, Suggestion
 
 _MAX_TOKENS = 2048
 _MAX_CLAIMS = 12
+_MAX_SUGGESTIONS = 6
 
 _SYSTEM_PROMPT = (
     "You extract concrete, verifiable claims from a software engineer's resume. "
@@ -37,6 +38,29 @@ _SYSTEM_PROMPT = (
     '{"claims": [{"text": string, "skills": [string], "category": string}]}\n\n'
     "If the resume is empty or contains no concrete, verifiable claims, return "
     '{"claims": []}. Never fabricate a claim to fill the list.'
+)
+
+
+_SUGGESTION_SYSTEM_PROMPT = (
+    "You are a senior engineer advising a peer on what to build and ship publicly "
+    "to make their resume credible. Propose specific, shippable side projects.\n\n"
+    "Use ONLY the gap report and repository facts provided between the <gap_report> "
+    "tags — never invent skills, projects, or repos that are not present there. "
+    "Ground every suggestion in a claim from that report.\n\n"
+    "An empty or thin public GitHub is the EXPECTED case, not an error: it means the "
+    "person's real work lives in private company repos. When it is empty, still "
+    "prescribe concrete starter projects that would prove their claimed skills from "
+    "scratch — never respond with 'nothing to suggest'.\n\n"
+    f"Propose at most the {_MAX_SUGGESTIONS} highest-value projects. Each MUST:\n"
+    "- prove a specific claim from the report (copy that claim's text verbatim into "
+    "'proves_claim'), preferring claims with no public evidence;\n"
+    "- be sized as exactly 'a weekend' or 'a week';\n"
+    "- name what to deliberately skip so it stays shippable in that time.\n\n"
+    "Return ONLY a JSON object, no prose, matching exactly this shape:\n"
+    '{"suggestions": [{"title": string, "what_to_build": string, '
+    '"proves_claim": string, "skills": [string], "size": string, "skip": string}]}\n\n'
+    "If the report contains no claims at all, return {\"suggestions\": []}. Never "
+    "fabricate a claim or a project to fill the list."
 )
 
 
@@ -63,6 +87,56 @@ def build_extraction_messages(resume_text: str) -> list[MessageParam]:
             ),
         }
     ]
+
+
+def build_suggestion_messages(gap_report: GapReport, profile: Profile) -> list[MessageParam]:
+    """Build the user message carrying the gap report + repo facts inside delimiters.
+
+    Kept separate (and returned as plain dicts) so tests can assert exactly what we
+    send without invoking the API. The gap report is rendered as plain text rather
+    than raw JSON so the model reasons over readable claim/evidence pairs.
+    """
+    return [
+        {
+            "role": "user",
+            "content": (
+                "Prescribe projects to build, grounded in this gap report.\n\n"
+                f"<gap_report>\n{_render_gap_report(gap_report, profile)}\n</gap_report>"
+            ),
+        }
+    ]
+
+
+def _render_gap_report(gap_report: GapReport, profile: Profile) -> str:
+    """Render a gap report + profile into the readable text block the prompt grounds on."""
+    lines = [
+        f"GitHub user: @{gap_report.profile_login}",
+        f"Public GitHub is empty: {gap_report.github_is_empty}",
+    ]
+
+    if profile.repos:
+        lines.append("Public repositories:")
+        for repo in profile.repos:
+            language = repo.primary_language or "unknown language"
+            lines.append(f"- {repo.name} ({language}): {repo.description or 'no description'}")
+    else:
+        lines.append("Public repositories: none.")
+
+    lines.append("")
+    lines.append("Claims WITHOUT public evidence (gaps to close):")
+    if gap_report.unsupported:
+        lines += [f"- {e.claim.text}" for e in gap_report.unsupported]
+    else:
+        lines.append("- (none)")
+
+    lines.append("")
+    lines.append("Claims already backed by public GitHub:")
+    if gap_report.supported:
+        lines += [f"- {e.claim.text}" for e in gap_report.supported]
+    else:
+        lines.append("- (none)")
+
+    return "\n".join(lines)
 
 
 class AnthropicClient:
@@ -96,6 +170,29 @@ class AnthropicClient:
 
         return _parse_claims(_response_text(response))
 
+    def generate_suggestions(
+        self, gap_report: GapReport, profile: Profile
+    ) -> list[Suggestion]:
+        """Ask Claude for candidate projects grounded in ``gap_report``.
+
+        Returns an empty list when the report has no claims to ground on. Raises
+        ``AnthropicError`` on API failure or an unparseable response. Ranking is
+        left to ``core/suggestions.py`` — this only produces candidates.
+        """
+        try:
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=_MAX_TOKENS,
+                system=_SUGGESTION_SYSTEM_PROMPT,
+                messages=build_suggestion_messages(gap_report, profile),
+            )
+        except anthropic.AuthenticationError as exc:
+            raise AnthropicAuthError("Anthropic rejected the API key.") from exc
+        except anthropic.APIError as exc:
+            raise AnthropicError(f"Anthropic request failed: {exc}") from exc
+
+        return _parse_suggestions(_response_text(response))
+
 
 def _response_text(response: Any) -> str:
     """Concatenate the text blocks of a messages response."""
@@ -124,6 +221,41 @@ def _parse_claims(raw: str) -> list[Claim]:
         category = str(item.get("category", "other")).strip() or "other"
         claims.append(Claim(text=text, skills=skills, category=category))
     return claims
+
+
+def _parse_suggestions(raw: str) -> list[Suggestion]:
+    """Parse the model's JSON payload into Suggestion models, tolerating stray prose."""
+    payload = _extract_json_object(raw)
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise AnthropicError(
+            "Anthropic returned an unparseable suggestions response."
+        ) from exc
+
+    items = data.get("suggestions", []) if isinstance(data, dict) else []
+    suggestions: list[Suggestion] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title", "")).strip()
+        what_to_build = str(item.get("what_to_build", "")).strip()
+        if not title or not what_to_build:
+            continue
+        skills = tuple(
+            str(s).strip().lower() for s in item.get("skills", []) if str(s).strip()
+        )
+        suggestions.append(
+            Suggestion(
+                title=title,
+                what_to_build=what_to_build,
+                proves_claim=str(item.get("proves_claim", "")).strip(),
+                skills=skills,
+                size=str(item.get("size", "")).strip() or "a week",
+                skip=str(item.get("skip", "")).strip(),
+            )
+        )
+    return suggestions
 
 
 def _extract_json_object(raw: str) -> str:

@@ -25,8 +25,9 @@ bridging Claude to the GitHub API. Full rationale in [`docs/PRODUCT.md`](docs/PR
 ## Status
 
 Early development. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what each version
-includes. Shipped: **v0.1 — walking skeleton** (`fetch_github_repos`) and
-**v0.2 — the gap finder** (`analyze_resume`). `suggest_projects` is next.
+includes. Shipped: **v0.1 — walking skeleton** (`fetch_github_repos`),
+**v0.2 — the gap finder** (`analyze_resume`), and **v0.3 — the prescription**
+(`suggest_projects`). v0.3 is the v1 milestone.
 
 ## What `analyze_resume` does (v0.2)
 
@@ -44,6 +45,25 @@ as a gap to close, never "nothing found".
 Results are cached in SQLite so re-analyzing the same resume doesn't re-hit the
 Anthropic API. In Claude Desktop, ask: **"analyze my resume against my GitHub"**
 and paste your resume + username.
+
+## What `suggest_projects` does (v0.3 — the star tool)
+
+Given your resume text and a GitHub username, it builds the same gap report as
+`analyze_resume`, then **prescribes what to build next**:
+
+1. Reuses the gap report (which claims your public GitHub does / doesn't back up).
+2. Asks Claude for candidate shippable projects grounded in that report.
+3. Ranks them in pure `core/` — **gaps first, quicker wins earlier** — into a
+   **30-day plan**.
+
+Each suggestion is tied to a concrete resume claim it would prove, sized
+("a weekend" / "a week"), and scoped (what to deliberately skip so it ships). The
+empty-GitHub case is the main case: instead of "nothing to show", it prescribes
+starter projects that build public credibility from scratch. Candidates are cached
+in SQLite so re-running the same gap report doesn't re-hit the Anthropic API.
+
+In Claude Desktop, ask: **"what should I build to make my resume credible?"** and
+paste your resume + username.
 
 ## Tech stack
 

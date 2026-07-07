@@ -14,7 +14,67 @@ from resume_assistant.clients.anthropic import (
     AnthropicClient,
     AnthropicError,
     build_extraction_messages,
+    build_suggestion_messages,
 )
+from resume_assistant.core.models import (
+    Claim,
+    ClaimEvidence,
+    GapReport,
+    Profile,
+    Repo,
+)
+
+
+def _gap_report(*, empty: bool) -> GapReport:
+    """A small gap report with one gap and one backed claim."""
+    return GapReport(
+        profile_login="octocat",
+        supported=(
+            ClaimEvidence(
+                claim=Claim(text="Built a cache in Go"),
+                supported=True,
+                matching_repos=("go-cache",),
+                rationale="",
+            ),
+        ),
+        unsupported=(
+            ClaimEvidence(
+                claim=Claim(text="Proficient in React"),
+                supported=False,
+                matching_repos=(),
+                rationale="",
+            ),
+        ),
+        github_is_empty=empty,
+    )
+
+
+def _profile(*, empty: bool) -> Profile:
+    repos = (
+        []
+        if empty
+        else [
+            Repo(
+                name="go-cache",
+                description="A distributed cache",
+                url="https://github.com/octocat/go-cache",
+                stars=42,
+                primary_language="Go",
+                created_at=None,
+                last_pushed_at=None,
+                is_fork=False,
+            )
+        ]
+    )
+    return Profile(
+        login="octocat",
+        name=None,
+        bio=None,
+        profile_url="https://github.com/octocat",
+        public_repo_count=len(repos),
+        followers=0,
+        repos=repos,
+    )
 
 
 def _text_response(text: str) -> SimpleNamespace:
@@ -106,3 +166,99 @@ def test_extract_claims_api_error_wrapped(mocker: MockerFixture) -> None:
 
     with pytest.raises(AnthropicError):
         AnthropicClient(api_key="k", model="claude-sonnet-5").extract_claims("r")
+
+
+# --- generate_suggestions (v0.3) --------------------------------------------
+
+
+def test_build_suggestion_messages_delimits_and_grounds_gap_report() -> None:
+    messages = build_suggestion_messages(_gap_report(empty=False), _profile(empty=False))
+    content = messages[0]["content"]
+
+    assert "<gap_report>" in content and "</gap_report>" in content
+    assert "Proficient in React" in content  # the unsupported claim (gap) is present
+    assert "Built a cache in Go" in content  # the supported claim is present
+    assert "go-cache" in content  # real repo facts ground the suggestions
+
+
+def test_generate_suggestions_parses_json(mocker: MockerFixture) -> None:
+    instance = _patch_sdk(mocker)
+    instance.messages.create.return_value = _text_response(
+        '{"suggestions": [{"title": "React dashboard", "what_to_build": '
+        '"A small dashboard", "proves_claim": "Proficient in React", '
+        '"skills": ["React"], "size": "a weekend", "skip": "auth"}]}'
+    )
+
+    suggestions = AnthropicClient(api_key="k", model="claude-sonnet-5").generate_suggestions(
+        _gap_report(empty=False), _profile(empty=False)
+    )
+
+    assert len(suggestions) == 1
+    assert suggestions[0].title == "React dashboard"
+    assert suggestions[0].proves_claim == "Proficient in React"
+    assert suggestions[0].skills == ("react",)  # normalized to lowercase
+    assert suggestions[0].size == "a weekend"
+    assert suggestions[0].skip == "auth"
+
+
+def test_generate_suggestions_uses_config_model_and_schema(mocker: MockerFixture) -> None:
+    instance = _patch_sdk(mocker)
+    instance.messages.create.return_value = _text_response('{"suggestions": []}')
+
+    AnthropicClient(api_key="k", model="claude-opus-4-8").generate_suggestions(
+        _gap_report(empty=True), _profile(empty=True)
+    )
+
+    kwargs = instance.messages.create.call_args.kwargs
+    assert kwargs["model"] == "claude-opus-4-8"  # model from config, not hardcoded
+    assert "return only a json object" in kwargs["system"].lower()  # schema instruction
+    assert "empty" in kwargs["system"].lower()  # empty-GitHub handling is instructed
+    assert "<gap_report>" in kwargs["messages"][0]["content"]
+
+
+def test_generate_suggestions_empty_response_returns_empty(mocker: MockerFixture) -> None:
+    instance = _patch_sdk(mocker)
+    instance.messages.create.return_value = _text_response('{"suggestions": []}')
+
+    suggestions = AnthropicClient(api_key="k", model="claude-sonnet-5").generate_suggestions(
+        _gap_report(empty=False), _profile(empty=False)
+    )
+
+    assert suggestions == []
+
+
+def test_generate_suggestions_skips_incomplete_items(mocker: MockerFixture) -> None:
+    instance = _patch_sdk(mocker)
+    instance.messages.create.return_value = _text_response(
+        '{"suggestions": [{"title": "", "what_to_build": "x"}, '
+        '{"title": "Real", "what_to_build": "Build it", "size": "a week"}]}'
+    )
+
+    suggestions = AnthropicClient(api_key="k", model="claude-sonnet-5").generate_suggestions(
+        _gap_report(empty=False), _profile(empty=False)
+    )
+
+    assert len(suggestions) == 1  # the item missing a title is dropped
+    assert suggestions[0].title == "Real"
+
+
+def test_generate_suggestions_unparseable_raises(mocker: MockerFixture) -> None:
+    instance = _patch_sdk(mocker)
+    instance.messages.create.return_value = _text_response("not json at all")
+
+    with pytest.raises(AnthropicError):
+        AnthropicClient(api_key="k", model="claude-sonnet-5").generate_suggestions(
+            _gap_report(empty=False), _profile(empty=False)
+        )
+
+
+def test_generate_suggestions_api_error_wrapped(mocker: MockerFixture) -> None:
+    instance = _patch_sdk(mocker)
+    instance.messages.create.side_effect = anthropic.APIError(
+        "boom", request=httpx.Request("POST", "https://api.anthropic.com"), body=None
+    )
+
+    with pytest.raises(AnthropicError):
+        AnthropicClient(api_key="k", model="claude-sonnet-5").generate_suggestions(
+            _gap_report(empty=False), _profile(empty=False)
+        )

@@ -88,3 +88,36 @@ class GapReport:
     def total_claims(self) -> int:
         """How many claims were extracted and evaluated."""
         return len(self.supported) + len(self.unsupported)
+
+
+@dataclass(frozen=True)
+class Suggestion:
+    """One specific, shippable project to make a resume claim credible.
+
+    Each suggestion is tied to a concrete claim (``proves_claim``), sized so the
+    user knows the effort (``size`` — e.g. "a weekend", "a week"), and scoped with
+    an explicit ``skip`` so it stays shippable. ``skills`` are the normalized
+    technologies it would demonstrate.
+    """
+
+    title: str
+    what_to_build: str
+    proves_claim: str
+    skills: tuple[str, ...]
+    size: str
+    skip: str
+
+
+@dataclass(frozen=True)
+class ProjectPlan:
+    """A ranked 30-day plan of projects derived from a gap report.
+
+    ``suggestions`` are ordered by ``core/suggestions.py`` (gaps first, quicker
+    wins earlier). The empty-GitHub case (our real target user) is carried through
+    in ``github_is_empty`` so the renderer can frame the plan as the way to build
+    public credibility from scratch, never as "nothing to suggest".
+    """
+
+    profile_login: str
+    suggestions: tuple[Suggestion, ...]
+    github_is_empty: bool
