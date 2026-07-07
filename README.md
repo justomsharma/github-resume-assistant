@@ -37,23 +37,63 @@ includes. Currently building **v0.1 — walking skeleton**.
 
 ## Getting started (dev)
 
-> Setup instructions get fleshed out as v0.1 lands. Rough shape:
-
 ```bash
 # 1. Create and activate a virtualenv
 python -m venv .venv && source .venv/bin/activate   # (Windows: .venv\Scripts\activate)
 
-# 2. Install dependencies
-pip install -r requirements.txt
+# 2. Install the package with dev/test extras
+pip install -e ".[dev]"
 
-# 3. Configure secrets
-cp .env.example .env      # then fill in GITHUB_TOKEN and ANTHROPIC_API_KEY
+# 3. Configure secrets (optional for v0.1 — see note below)
+cp .env.example .env      # then fill in GITHUB_TOKEN (ANTHROPIC_* used from v0.2)
 
 # 4. Run tests
 pytest
 ```
 
-Claude Desktop MCP config instructions land with v0.1.
+> **`GITHUB_TOKEN` is optional.** The GitHub REST API works unauthenticated, just
+> with a lower rate limit. Set a token (a fine-grained token with public read
+> access is enough) to avoid hitting that limit. `ANTHROPIC_API_KEY` /
+> `ANTHROPIC_MODEL` are read now but unused until v0.2.
+
+## Registering the server in Claude Desktop
+
+The server speaks MCP over stdio. Add it to your Claude Desktop config file:
+
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+```jsonc
+{
+  "mcpServers": {
+    "github-resume-assistant": {
+      "command": "/absolute/path/to/.venv/bin/resume-assistant",
+      "env": {
+        "GITHUB_TOKEN": "your_github_token_here"
+      }
+    }
+  }
+}
+```
+
+`resume-assistant` is the console script installed by `pip install -e ".[dev]"`.
+On Windows the path is `...\.venv\Scripts\resume-assistant.exe`. If you'd rather
+not rely on the script, use your interpreter directly instead:
+
+```jsonc
+{
+  "mcpServers": {
+    "github-resume-assistant": {
+      "command": "/absolute/path/to/.venv/bin/python",
+      "args": ["-m", "resume_assistant.server.app"],
+      "env": { "GITHUB_TOKEN": "your_github_token_here" }
+    }
+  }
+}
+```
+
+Fully quit and reopen Claude Desktop, then ask: **"show me the GitHub repos for
+octocat"** — Claude will call `fetch_github_repos` and return the real data.
 
 ## For contributors (and future you)
 
