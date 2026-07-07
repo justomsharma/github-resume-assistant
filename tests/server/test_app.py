@@ -3,23 +3,31 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from pytest_mock import MockerFixture
 
+from resume_assistant.clients.anthropic import AnthropicError
 from resume_assistant.clients.github import GitHubError, UserNotFoundError
-from resume_assistant.core.models import Profile, Repo
+from resume_assistant.config import Config
+from resume_assistant.core.models import Claim, Profile, Repo
 from resume_assistant.server import app
 
 
-def test_tool_registered_with_schema() -> None:
+def test_tools_registered_with_schema() -> None:
     tools = asyncio.run(app.mcp.list_tools())
     by_name = {t.name: t for t in tools}
 
-    assert set(by_name) == {"fetch_github_repos"}
-    tool = by_name["fetch_github_repos"]
-    assert tool.description  # a description exists for Claude to reason over
-    assert "username" in tool.inputSchema["properties"]
-    assert tool.inputSchema["required"] == ["username"]
+    assert set(by_name) == {"fetch_github_repos", "analyze_resume"}
+
+    fetch = by_name["fetch_github_repos"]
+    assert fetch.description
+    assert fetch.inputSchema["required"] == ["username"]
+
+    analyze = by_name["analyze_resume"]
+    assert analyze.description  # a description exists for Claude to reason over
+    assert set(analyze.inputSchema["properties"]) == {"resume_text", "username"}
+    assert set(analyze.inputSchema["required"]) == {"resume_text", "username"}
 
 
 def _fetch(username: str) -> str:
@@ -107,3 +115,108 @@ def test_generic_github_error_friendly_message(mocker: MockerFixture) -> None:
     result = _fetch("octocat")
 
     assert "Couldn't fetch GitHub data" in result
+
+
+# --- analyze_resume (v0.2) ---------------------------------------------------
+
+
+def _patch_config(mocker: MockerFixture, tmp_path: Path, api_key: str | None) -> None:
+    """Point analyze_resume at a temp cache and control the API key."""
+    mocker.patch.object(
+        app,
+        "load_config",
+        return_value=Config(
+            github_token=None,
+            anthropic_api_key=api_key,
+            anthropic_model="claude-sonnet-5",
+            cache_path=str(tmp_path / "cache.db"),
+        ),
+    )
+
+
+def test_analyze_blank_inputs_handled(mocker: MockerFixture) -> None:
+    client = mocker.patch.object(app, "GitHubClient")
+
+    assert "provide the resume text" in app.analyze_resume("   ", "octocat")
+    assert "provide a GitHub username" in app.analyze_resume("Built X.", "  ")
+    client.assert_not_called()  # never hits the network for blank input
+
+
+def test_analyze_happy_path_formats_gap_report(
+    mocker: MockerFixture, tmp_path: Path, profile_with_repos: Profile
+) -> None:
+    _patch_config(mocker, tmp_path, api_key="k")
+    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = (
+        profile_with_repos
+    )
+    mocker.patch.object(app, "AnthropicClient").return_value.extract_claims.return_value = [
+        Claim(text="Built a cache in Go", skills=("go",), category="project"),
+        Claim(text="Proficient in React", skills=("react",), category="skill"),
+    ]
+
+    result = app.analyze_resume("some resume", "octocat")
+
+    assert "gap report for @octocat" in result
+    assert "Built a cache in Go" in result  # supported (go-cache repo)
+    assert "go-cache" in result
+    assert "Proficient in React" in result  # unsupported
+    assert "Not yet backed publicly" in result
+
+
+def test_analyze_empty_github_degrades_gracefully(
+    mocker: MockerFixture, tmp_path: Path, empty_profile: Profile
+) -> None:
+    _patch_config(mocker, tmp_path, api_key="k")
+    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = (
+        empty_profile
+    )
+    mocker.patch.object(app, "AnthropicClient").return_value.extract_claims.return_value = [
+        Claim(text="Built a cache in Go", skills=("go",), category="project"),
+    ]
+
+    result = app.analyze_resume("some resume", "newgrad")
+
+    assert "no public repositories yet" in result
+    assert "gap to close" in result  # framed as the gap, not "nothing found"
+    assert "Claims to make credible" in result
+
+
+def test_analyze_missing_key_friendly_message(
+    mocker: MockerFixture, tmp_path: Path, profile_with_repos: Profile
+) -> None:
+    _patch_config(mocker, tmp_path, api_key=None)
+    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = (
+        profile_with_repos
+    )
+
+    result = app.analyze_resume("some resume", "octocat")
+
+    assert "Couldn't analyze the resume" in result
+    assert "ANTHROPIC_API_KEY" in result  # explains what's missing
+
+
+def test_analyze_unknown_user_friendly_message(mocker: MockerFixture, tmp_path: Path) -> None:
+    _patch_config(mocker, tmp_path, api_key="k")
+    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.side_effect = (
+        UserNotFoundError("404")
+    )
+
+    result = app.analyze_resume("some resume", "ghost")
+
+    assert "No GitHub user found" in result
+
+
+def test_analyze_anthropic_error_friendly_message(
+    mocker: MockerFixture, tmp_path: Path, profile_with_repos: Profile
+) -> None:
+    _patch_config(mocker, tmp_path, api_key="k")
+    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = (
+        profile_with_repos
+    )
+    mocker.patch.object(app, "AnthropicClient").return_value.extract_claims.side_effect = (
+        AnthropicError("rate limited")
+    )
+
+    result = app.analyze_resume("some resume", "octocat")
+
+    assert "Couldn't analyze the resume right now" in result

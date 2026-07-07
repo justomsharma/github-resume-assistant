@@ -25,7 +25,25 @@ bridging Claude to the GitHub API. Full rationale in [`docs/PRODUCT.md`](docs/PR
 ## Status
 
 Early development. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what each version
-includes. Currently building **v0.1 — walking skeleton**.
+includes. Shipped: **v0.1 — walking skeleton** (`fetch_github_repos`) and
+**v0.2 — the gap finder** (`analyze_resume`). `suggest_projects` is next.
+
+## What `analyze_resume` does (v0.2)
+
+Given your resume text and a GitHub username, it:
+
+1. Extracts the strongest, most concrete claims from the resume (via Claude).
+2. Cross-references each claim against your real public repositories.
+3. Returns a **gap report** — which claims have public GitHub evidence and which
+   are gaps to close.
+
+If your public GitHub is empty or thin — the common case when your real work
+lives in private company repos — it degrades gracefully and frames every claim
+as a gap to close, never "nothing found".
+
+Results are cached in SQLite so re-analyzing the same resume doesn't re-hit the
+Anthropic API. In Claude Desktop, ask: **"analyze my resume against my GitHub"**
+and paste your resume + username.
 
 ## Tech stack
 
@@ -44,8 +62,8 @@ python -m venv .venv && source .venv/bin/activate   # (Windows: .venv\Scripts\ac
 # 2. Install the package with dev/test extras
 pip install -e ".[dev]"
 
-# 3. Configure secrets (optional for v0.1 — see note below)
-cp .env.example .env      # then fill in GITHUB_TOKEN (ANTHROPIC_* used from v0.2)
+# 3. Configure secrets (see note below)
+cp .env.example .env      # GITHUB_TOKEN optional; ANTHROPIC_API_KEY required for analyze_resume
 
 # 4. Run tests
 pytest
@@ -53,8 +71,11 @@ pytest
 
 > **`GITHUB_TOKEN` is optional.** The GitHub REST API works unauthenticated, just
 > with a lower rate limit. Set a token (a fine-grained token with public read
-> access is enough) to avoid hitting that limit. `ANTHROPIC_API_KEY` /
-> `ANTHROPIC_MODEL` are read now but unused until v0.2.
+> access is enough) to avoid hitting that limit.
+>
+> **`ANTHROPIC_API_KEY` is required for `analyze_resume`.** `ANTHROPIC_MODEL`
+> defaults to `claude-sonnet-5` (swappable). `CACHE_PATH` is optional — the SQLite
+> cache defaults to `./.cache/resume_assistant.db`.
 
 ## Registering the server in Claude Desktop
 
@@ -69,7 +90,8 @@ The server speaks MCP over stdio. Add it to your Claude Desktop config file:
     "github-resume-assistant": {
       "command": "/absolute/path/to/.venv/bin/resume-assistant",
       "env": {
-        "GITHUB_TOKEN": "your_github_token_here"
+        "GITHUB_TOKEN": "your_github_token_here",
+        "ANTHROPIC_API_KEY": "your_anthropic_key_here"
       }
     }
   }
@@ -86,7 +108,10 @@ not rely on the script, use your interpreter directly instead:
     "github-resume-assistant": {
       "command": "/absolute/path/to/.venv/bin/python",
       "args": ["-m", "resume_assistant.server.app"],
-      "env": { "GITHUB_TOKEN": "your_github_token_here" }
+      "env": {
+        "GITHUB_TOKEN": "your_github_token_here",
+        "ANTHROPIC_API_KEY": "your_anthropic_key_here"
+      }
     }
   }
 }

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
+from resume_assistant.cache.store import CachingClaimExtractor, SqliteCache
+from resume_assistant.clients.anthropic import AnthropicClient, AnthropicError
 from resume_assistant.clients.github import (
     GitHubClient,
     GitHubError,
@@ -16,7 +18,8 @@ from resume_assistant.clients.github import (
     UserNotFoundError,
 )
 from resume_assistant.config import load_config
-from resume_assistant.core.models import Profile, Repo
+from resume_assistant.core.analysis import build_gap_report
+from resume_assistant.core.models import ClaimEvidence, GapReport, Profile, Repo
 
 mcp = FastMCP("github-resume-assistant")
 
@@ -52,6 +55,103 @@ def fetch_github_repos(username: str) -> str:
         return f"Couldn't fetch GitHub data right now: {exc}"
 
     return format_profile(profile)
+
+
+@mcp.tool()
+def analyze_resume(resume_text: str, username: str) -> str:
+    """Find which resume claims a GitHub profile does and doesn't back up.
+
+    Extracts the strongest, most concrete claims from the resume, cross-references
+    them against the user's real public repositories, and returns a gap report:
+    which claims have public GitHub evidence and which are gaps to close. Handles
+    an empty or thin GitHub gracefully — that's the common case for engineers whose
+    work lives in private repos, and the report frames it as the gap to close.
+
+    Args:
+        resume_text: The full text of the resume to analyze.
+        username: The GitHub login whose public repos ground the analysis.
+    """
+    resume_text = resume_text.strip()
+    username = username.strip()
+    if not resume_text:
+        return "Please provide the resume text to analyze."
+    if not username:
+        return "Please provide a GitHub username to cross-reference against."
+
+    config = load_config()
+    github = GitHubClient(token=config.github_token)
+    try:
+        profile = github.fetch_profile(username)
+    except UserNotFoundError:
+        return f"No GitHub user found with the username '{username}'."
+    except RateLimitError:
+        return (
+            "GitHub's API rate limit is exhausted. Set a GITHUB_TOKEN in your "
+            "environment for a much higher limit, then try again."
+        )
+    except GitHubError as exc:
+        return f"Couldn't fetch GitHub data right now: {exc}"
+
+    try:
+        extractor = CachingClaimExtractor(
+            AnthropicClient(api_key=config.anthropic_api_key, model=config.anthropic_model),
+            cache=SqliteCache(config.cache_path),
+            model=config.anthropic_model,
+        )
+        report = build_gap_report(resume_text, profile, extractor)
+    except AnthropicError as exc:
+        return f"Couldn't analyze the resume right now: {exc}"
+
+    return format_gap_report(report)
+
+
+def format_gap_report(report: GapReport) -> str:
+    """Render a GapReport into readable Markdown for Claude to present."""
+    lines = [
+        f"# Resume gap report for @{report.profile_login}",
+        "",
+        (
+            f"Analyzed {report.total_claims} claim(s): "
+            f"{len(report.supported)} backed by public GitHub, "
+            f"{len(report.unsupported)} not."
+        ),
+    ]
+
+    if report.github_is_empty:
+        lines += [
+            "",
+            f"**@{report.profile_login} has no public repositories yet.** That's the "
+            "common case when real work lives in private company repos — so every claim "
+            "below is currently unbacked publicly. This is the gap to close: the next "
+            "step is deciding what to build and ship publicly to make each claim credible.",
+        ]
+
+    if report.supported:
+        lines += ["", "## Backed by public GitHub", ""]
+        lines += [_format_evidence(e) for e in report.supported]
+
+    if report.unsupported:
+        heading = (
+            "## Claims to make credible"
+            if report.github_is_empty
+            else "## Not yet backed publicly"
+        )
+        lines += ["", heading, ""]
+        lines += [_format_evidence(e) for e in report.unsupported]
+
+    if report.total_claims == 0:
+        lines += [
+            "",
+            "No concrete, verifiable claims were found in the resume text. Add specific "
+            "projects, technologies, and outcomes, then run this again.",
+        ]
+
+    return "\n".join(lines)
+
+
+def _format_evidence(evidence: ClaimEvidence) -> str:
+    """Render one claim + verdict as a Markdown bullet."""
+    return f"- **{evidence.claim.text}**\n  {evidence.rationale}"
 
 
 def format_profile(profile: Profile) -> str:
