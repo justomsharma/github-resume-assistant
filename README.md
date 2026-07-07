@@ -86,6 +86,10 @@ Run it locally:
 # after `pip install -e ".[dev]"` and setting ANTHROPIC_API_KEY (see below)
 resume-assistant-web
 # then open http://127.0.0.1:5000
+
+# if `resume-assistant-web` isn't found (its Scripts dir isn't on PATH,
+# common on Windows), run it as a module instead:
+python -m resume_assistant.web.app
 ```
 
 `ANTHROPIC_API_KEY` is required; `GITHUB_TOKEN` is optional (a higher GitHub rate
