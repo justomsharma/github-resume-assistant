@@ -59,18 +59,18 @@ def test_has_github_results_show_meter_and_plan(
     mocker: MockerFixture, client: FlaskClient, profile_with_repos: Profile
 ) -> None:
     claim = Claim(text="Built a distributed cache in Go", skills=("go",))
-    supported = (
-        ClaimEvidence(claim, True, ("go-cache",), "Backed by public repo go-cache."),
-    )
+    supported = (ClaimEvidence(claim, True, ("go-cache",), "Backed by public repo go-cache."),)
     react = Claim(text="Proficient in React", skills=("react",))
     unsupported = (ClaimEvidence(react, False, (), "No public repo names React."),)
     suggestion = Suggestion(
-        "react-dashboard", "A live dashboard.", "Proficient in React",
-        ("react",), "a weekend", "auth",
+        "react-dashboard",
+        "A live dashboard.",
+        "Proficient in React",
+        ("react",),
+        "a weekend",
+        "auth",
     )
-    outcome = _result(
-        profile_with_repos, False, supported, unsupported, (suggestion,)
-    )
+    outcome = _result(profile_with_repos, False, supported, unsupported, (suggestion,))
     mocker.patch.object(webapp, "run_analysis", return_value=outcome)
 
     resp = client.post("/analyze", data={"resume_text": "x", "username": "octocat"})
@@ -91,8 +91,12 @@ def test_empty_github_is_the_main_case(
     claim = Claim(text="Built a distributed cache in Go", skills=("go",))
     unsupported = (ClaimEvidence(claim, False, (), "No public repo demonstrates this."),)
     suggestion = Suggestion(
-        "go-lru-cache", "A concurrent LRU cache.", "Built a distributed cache in Go",
-        ("go",), "a weekend", "real distributed consensus",
+        "go-lru-cache",
+        "A concurrent LRU cache.",
+        "Built a distributed cache in Go",
+        ("go",),
+        "a weekend",
+        "real distributed consensus",
     )
     outcome = _result(empty_profile, True, (), unsupported, (suggestion,))
     mocker.patch.object(webapp, "run_analysis", return_value=outcome)
@@ -107,9 +111,7 @@ def test_empty_github_is_the_main_case(
     assert "not shown yet" in body
 
 
-def test_blank_resume_returns_validation_error(
-    mocker: MockerFixture, client: FlaskClient
-) -> None:
+def test_blank_resume_returns_validation_error(mocker: MockerFixture, client: FlaskClient) -> None:
     run = mocker.patch.object(webapp, "run_analysis")
 
     resp = client.post("/analyze", data={"resume_text": "  ", "username": "octocat"})

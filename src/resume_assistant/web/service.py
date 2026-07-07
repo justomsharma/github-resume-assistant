@@ -51,9 +51,7 @@ _RATE_LIMIT_MESSAGE = (
 )
 
 
-def run_analysis(
-    resume_text: str, username: str, config: Config
-) -> AnalysisResult | AnalysisError:
+def run_analysis(resume_text: str, username: str, config: Config) -> AnalysisResult | AnalysisError:
     """Fetch the profile, build the gap report, and rank the plan.
 
     Returns an ``AnalysisResult`` on success or an ``AnalysisError`` with a
