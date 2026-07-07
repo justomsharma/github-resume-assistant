@@ -11,6 +11,8 @@ from mcp.server.fastmcp import FastMCP
 
 from resume_assistant.cache.store import (
     CachingClaimExtractor,
+    CachingClaimVerifier,
+    CachingRepoEvidenceFetcher,
     CachingSuggestionGenerator,
     SqliteCache,
 )
@@ -34,6 +36,15 @@ from resume_assistant.core.models import (
 from resume_assistant.core.suggestions import build_project_plan
 
 mcp = FastMCP("github-resume-assistant")
+
+# Grounding claims reads each repo's code (tree, manifests, languages, README), so
+# analysis makes several GitHub calls per repo. Unauthenticated, that can exhaust
+# the rate limit on a profile with many repos — hence the explicit token hint.
+_RATE_LIMIT_MESSAGE = (
+    "GitHub's API rate limit is exhausted. Grounding claims reads each repo's code, "
+    "which is call-heavy — set a GITHUB_TOKEN in your environment for a much higher "
+    "limit, then try again."
+)
 
 
 @mcp.tool()
@@ -92,25 +103,22 @@ def analyze_resume(resume_text: str, username: str) -> str:
 
     config = load_config()
     github = GitHubClient(token=config.github_token)
+    cache = SqliteCache(config.cache_path)
     try:
         profile = github.fetch_profile(username)
+        evidence = CachingRepoEvidenceFetcher(github, cache=cache).fetch_repo_evidence(profile)
     except UserNotFoundError:
         return f"No GitHub user found with the username '{username}'."
     except RateLimitError:
-        return (
-            "GitHub's API rate limit is exhausted. Set a GITHUB_TOKEN in your "
-            "environment for a much higher limit, then try again."
-        )
+        return _RATE_LIMIT_MESSAGE
     except GitHubError as exc:
         return f"Couldn't fetch GitHub data right now: {exc}"
 
     try:
-        extractor = CachingClaimExtractor(
-            AnthropicClient(api_key=config.anthropic_api_key, model=config.anthropic_model),
-            cache=SqliteCache(config.cache_path),
-            model=config.anthropic_model,
-        )
-        report = build_gap_report(resume_text, profile, extractor)
+        client = AnthropicClient(api_key=config.anthropic_api_key, model=config.anthropic_model)
+        extractor = CachingClaimExtractor(client, cache=cache, model=config.anthropic_model)
+        verifier = CachingClaimVerifier(client, cache=cache, model=config.anthropic_model)
+        report = build_gap_report(resume_text, profile, evidence, extractor, verifier)
     except AnthropicError as exc:
         return f"Couldn't analyze the resume right now: {exc}"
 
@@ -141,23 +149,22 @@ def suggest_projects(resume_text: str, username: str) -> str:
 
     config = load_config()
     github = GitHubClient(token=config.github_token)
+    cache = SqliteCache(config.cache_path)
     try:
         profile = github.fetch_profile(username)
+        evidence = CachingRepoEvidenceFetcher(github, cache=cache).fetch_repo_evidence(profile)
     except UserNotFoundError:
         return f"No GitHub user found with the username '{username}'."
     except RateLimitError:
-        return (
-            "GitHub's API rate limit is exhausted. Set a GITHUB_TOKEN in your "
-            "environment for a much higher limit, then try again."
-        )
+        return _RATE_LIMIT_MESSAGE
     except GitHubError as exc:
         return f"Couldn't fetch GitHub data right now: {exc}"
 
     try:
-        cache = SqliteCache(config.cache_path)
         client = AnthropicClient(api_key=config.anthropic_api_key, model=config.anthropic_model)
         extractor = CachingClaimExtractor(client, cache=cache, model=config.anthropic_model)
-        report = build_gap_report(resume_text, profile, extractor)
+        verifier = CachingClaimVerifier(client, cache=cache, model=config.anthropic_model)
+        report = build_gap_report(resume_text, profile, evidence, extractor, verifier)
         suggester = CachingSuggestionGenerator(client, cache=cache, model=config.anthropic_model)
         plan = build_project_plan(report, profile, suggester)
     except AnthropicError as exc:
@@ -172,9 +179,9 @@ def format_gap_report(report: GapReport) -> str:
         f"# Resume gap report for @{report.profile_login}",
         "",
         (
-            f"Analyzed {report.total_claims} claim(s): "
-            f"{len(report.supported)} backed by public GitHub, "
-            f"{len(report.unsupported)} not."
+            f"Graded {report.total_claims} claim(s) against real public code: "
+            f"{len(report.backed)} backed, {len(report.not_shown)} not shown yet, "
+            f"{len(report.not_verifiable)} not verifiable from public code."
         ),
     ]
 
@@ -187,16 +194,18 @@ def format_gap_report(report: GapReport) -> str:
             "step is deciding what to build and ship publicly to make each claim credible.",
         ]
 
-    if report.supported:
-        lines += ["", "## Backed by public GitHub", ""]
-        lines += [_format_evidence(e) for e in report.supported]
+    if report.backed:
+        lines += ["", "## Backed by public code", ""]
+        lines += [_format_evidence(e) for e in report.backed]
 
-    if report.unsupported:
-        heading = (
-            "## Claims to make credible" if report.github_is_empty else "## Not yet backed publicly"
-        )
+    if report.not_shown:
+        heading = "## Claims to make credible" if report.github_is_empty else "## Not shown yet"
         lines += ["", heading, ""]
-        lines += [_format_evidence(e) for e in report.unsupported]
+        lines += [_format_evidence(e) for e in report.not_shown]
+
+    if report.not_verifiable:
+        lines += ["", "## Not verifiable from public code", ""]
+        lines += [_format_evidence(e) for e in report.not_verifiable]
 
     if report.total_claims == 0:
         lines += [
@@ -253,8 +262,11 @@ def _format_suggestion(index: int, suggestion: Suggestion) -> str:
 
 
 def _format_evidence(evidence: ClaimEvidence) -> str:
-    """Render one claim + verdict as a Markdown bullet."""
-    return f"- **{evidence.claim.text}**\n  {evidence.rationale}"
+    """Render one claim + graded verdict as a Markdown bullet, citing files when backed."""
+    bullet = f"- **{evidence.claim.text}**\n  {evidence.rationale}"
+    if evidence.cited_files:
+        bullet += f"\n  Cites: {', '.join(evidence.cited_files)}"
+    return bullet
 
 
 def format_profile(profile: Profile) -> str:

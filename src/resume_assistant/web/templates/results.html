@@ -9,8 +9,9 @@
 {% endblock %}
 
 {% block content %}
-{% set backed = report.supported|length %}
-{% set gaps = report.unsupported|length %}
+{% set backed = report.backed|length %}
+{% set gaps = report.not_shown|length %}
+{% set nverif = report.not_verifiable|length %}
 {% set total = report.total_claims %}
 {% set pct = (backed * 100 // total) if total else 0 %}
 {% set empty = report.github_is_empty %}
@@ -31,8 +32,8 @@
     <div class="summary" id="h-summary"{% if empty or total == 0 %} hidden{% endif %}>
       <div class="meter" id="h-meter" style="--pct: {{ pct }}"><span class="val"><b>{{ pct }}%</b><span>backed</span></span></div>
       <div class="callout">
-        <div class="big">{{ backed }} of {{ total }} claims backed by public GitHub.</div>
-        <div class="small">The matcher checks repo language, name, and description — a signal, not proof. Skim the backed list to catch any it got wrong.</div>
+        <div class="big">{{ backed }} of {{ total }} claims backed by public code.</div>
+        <div class="small">Each verdict is graded against your real repo code — dependencies, file tree, and README — and backed claims cite the specific files that prove them.</div>
       </div>
     </div>
 
@@ -43,8 +44,8 @@
     </div>
   </section>
 
-  <div class="rxhead"><span class="n">&#8478;</span><h2>Diagnosis</h2><span class="meta">{{ total }} claim{{ 's' if total != 1 else '' }} · {{ backed }} backed · {{ gaps }} not shown yet</span></div>
-  <p class="subtle">What your public GitHub does and doesn't yet prove. This is a shallow token match — a signal, not proof — so "not shown yet" is a gap to close, not a mark against you.</p>
+  <div class="rxhead"><span class="n">&#8478;</span><h2>Diagnosis</h2><span class="meta">{{ total }} claim{{ 's' if total != 1 else '' }} · {{ backed }} backed · {{ gaps }} not shown yet{% if nverif %} · {{ nverif }} not verifiable{% endif %}</span></div>
+  <p class="subtle">What your public code does and doesn't yet prove. Each claim is graded against your real repos and backed claims cite specific files — so "not shown yet" is a gap to close, not a mark against you, and "not verifiable from public code" just means public code can't prove that kind of claim.</p>
 
   {% if total == 0 %}
   <div class="dx">
@@ -52,15 +53,21 @@
   </div>
   {% else %}
   <div class="dx" id="dx-list">
-    {% for evidence in report.supported %}
+    {% for evidence in report.backed %}
     <div class="r">
       <span class="st st-ok">backed</span>
+      <span class="claim">{{ evidence.claim.text }}<span class="why">{{ evidence.rationale }}{% if evidence.cited_files %} <span class="cites">Cites: {{ evidence.cited_files|join(', ') }}</span>{% endif %}</span></span>
+    </div>
+    {% endfor %}
+    {% for evidence in report.not_shown %}
+    <div class="r">
+      <span class="st st-gap">not shown yet</span>
       <span class="claim">{{ evidence.claim.text }}<span class="why">{{ evidence.rationale }}</span></span>
     </div>
     {% endfor %}
-    {% for evidence in report.unsupported %}
+    {% for evidence in report.not_verifiable %}
     <div class="r">
-      <span class="st st-gap">not shown yet</span>
+      <span class="st st-na">not verifiable from public code</span>
       <span class="claim">{{ evidence.claim.text }}<span class="why">{{ evidence.rationale }}</span></span>
     </div>
     {% endfor %}

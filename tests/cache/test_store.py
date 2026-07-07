@@ -6,6 +6,8 @@ from pathlib import Path
 
 from resume_assistant.cache.store import (
     CachingClaimExtractor,
+    CachingClaimVerifier,
+    CachingRepoEvidenceFetcher,
     CachingSuggestionGenerator,
     SqliteCache,
 )
@@ -14,6 +16,8 @@ from resume_assistant.core.models import (
     ClaimEvidence,
     GapReport,
     Profile,
+    Repo,
+    RepoEvidence,
     Suggestion,
 )
 
@@ -83,15 +87,17 @@ def test_caching_extractor_distinct_resumes_miss(tmp_path: Path) -> None:
 def _report(*, login: str = "octocat", gap: str = "Proficient in React") -> GapReport:
     return GapReport(
         profile_login=login,
-        supported=(),
-        unsupported=(
+        backed=(),
+        not_shown=(
             ClaimEvidence(
                 claim=Claim(text=gap),
-                supported=False,
+                verdict="not_shown",
                 matching_repos=(),
+                cited_files=(),
                 rationale="",
             ),
         ),
+        not_verifiable=(),
         github_is_empty=True,
     )
 
@@ -144,3 +150,126 @@ def test_caching_suggester_distinct_reports_miss(tmp_path: Path) -> None:
     suggester.generate_suggestions(_report(gap="Built a cache in Go"), _profile())
 
     assert inner.calls == 2  # different gap content → different key → not a cache hit
+
+
+# --- CachingRepoEvidenceFetcher (v2.1) ---------------------------------------
+
+
+def _repo(name: str, pushed_at: str | None, *, is_fork: bool = False) -> Repo:
+    return Repo(
+        name=name,
+        description=None,
+        url=f"https://github.com/octocat/{name}",
+        stars=0,
+        primary_language="Go",
+        created_at=None,
+        last_pushed_at=pushed_at,
+        is_fork=is_fork,
+    )
+
+
+def _profile_with(repos: list[Repo]) -> Profile:
+    return Profile("octocat", None, None, "", len(repos), 0, repos=repos)
+
+
+def _evidence(name: str, pushed_at: str | None) -> RepoEvidence:
+    return RepoEvidence(
+        repo_name=name,
+        primary_language="Go",
+        language_breakdown=(("Go", 100),),
+        dependencies=("dep-a",),
+        notable_paths=("src/main.go",),
+        file_count=3,
+        readme_excerpt="# readme",
+        pushed_at=pushed_at,
+    )
+
+
+class CountingFetcher:
+    """Records how many times it fetched (stands in for the GitHub client)."""
+
+    def __init__(self, evidence: list[RepoEvidence]) -> None:
+        self._evidence = evidence
+        self.calls = 0
+
+    def fetch_repo_evidence(self, profile: Profile) -> list[RepoEvidence]:
+        self.calls += 1
+        return self._evidence
+
+
+def test_caching_fetcher_second_call_hits_cache(tmp_path: Path) -> None:
+    profile = _profile_with([_repo("go-cache", "2024-06-01T00:00:00Z")])
+    inner = CountingFetcher([_evidence("go-cache", "2024-06-01T00:00:00Z")])
+    fetcher = CachingRepoEvidenceFetcher(inner, _cache(tmp_path))
+
+    first = fetcher.fetch_repo_evidence(profile)
+    second = fetcher.fetch_repo_evidence(profile)
+
+    assert inner.calls == 1  # unchanged repos → cache hit, no GitHub calls
+    assert first == second
+    assert second[0].repo_name == "go-cache"
+    assert second[0].dependencies == ("dep-a",)
+
+
+def test_caching_fetcher_rekeys_when_a_repo_is_pushed(tmp_path: Path) -> None:
+    cache = _cache(tmp_path)
+    inner = CountingFetcher([_evidence("go-cache", "2024-06-01T00:00:00Z")])
+    fetcher = CachingRepoEvidenceFetcher(inner, cache)
+
+    fetcher.fetch_repo_evidence(_profile_with([_repo("go-cache", "2024-06-01T00:00:00Z")]))
+    fetcher.fetch_repo_evidence(_profile_with([_repo("go-cache", "2024-07-01T00:00:00Z")]))
+
+    assert inner.calls == 2  # a new pushed_at changes the fingerprint → re-fetch
+
+
+# --- CachingClaimVerifier (v2.1) ---------------------------------------------
+
+
+def _verdict(text: str) -> ClaimEvidence:
+    return ClaimEvidence(
+        claim=Claim(text=text, skills=("go",)),
+        verdict="backed",
+        matching_repos=("go-cache",),
+        cited_files=("go-cache/src/main.go",),
+        rationale="cited",
+    )
+
+
+class CountingVerifier:
+    """Records how many times it graded (stands in for the Anthropic client)."""
+
+    def __init__(self, verdicts: list[ClaimEvidence]) -> None:
+        self._verdicts = verdicts
+        self.calls = 0
+
+    def verify_claims(
+        self, claims: list[Claim], evidence: list[RepoEvidence]
+    ) -> list[ClaimEvidence]:
+        self.calls += 1
+        return self._verdicts
+
+
+def test_caching_verifier_second_call_hits_cache(tmp_path: Path) -> None:
+    claims = [Claim(text="Built a cache in Go", skills=("go",))]
+    evidence = [_evidence("go-cache", "2024-06-01T00:00:00Z")]
+    inner = CountingVerifier([_verdict("Built a cache in Go")])
+    verifier = CachingClaimVerifier(inner, _cache(tmp_path), model="claude-sonnet-5")
+
+    first = verifier.verify_claims(claims, evidence)
+    second = verifier.verify_claims(claims, evidence)
+
+    assert inner.calls == 1  # same claims + evidence → cache hit
+    assert first == second
+    assert second[0].verdict == "backed"
+    assert second[0].cited_files == ("go-cache/src/main.go",)
+
+
+def test_caching_verifier_rekeys_when_evidence_changes(tmp_path: Path) -> None:
+    claims = [Claim(text="Built a cache in Go", skills=("go",))]
+    inner = CountingVerifier([_verdict("Built a cache in Go")])
+    verifier = CachingClaimVerifier(inner, _cache(tmp_path), model="claude-sonnet-5")
+
+    verifier.verify_claims(claims, [_evidence("go-cache", "2024-06-01T00:00:00Z")])
+    verifier.verify_claims(claims, [_evidence("go-cache", "2024-07-01T00:00:00Z")])
+
+    assert inner.calls == 2  # evidence pushed_at changed → different key → re-verify

@@ -126,8 +126,10 @@ textarea.field{ min-height:130px; resize:vertical; line-height:1.5; }
 .dx .st{ font-size:10.5px; font-weight:800; letter-spacing:.04em; padding:3px 9px; border-radius:20px; white-space:nowrap; margin-top:1px; }
 .st-gap{ color:var(--accent-ink); background:var(--accent-soft); }
 .st-ok{ color:var(--rx); background:var(--rx-soft); }
+.st-na{ color:var(--muted); background:var(--hair); }
 .dx .claim{ font-size:14px; }
 .dx .claim .why{ display:block; font-size:12.5px; color:var(--muted); margin-top:2px; }
+.dx .claim .why .cites{ font-family:var(--mono); color:var(--rx); }
 .dx .claim .repo{ font-family:var(--mono); color:var(--rx); }
 
 .track{ display:flex; flex-direction:column; }

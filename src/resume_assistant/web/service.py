@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 from resume_assistant.cache.store import (
     CachingClaimExtractor,
+    CachingClaimVerifier,
+    CachingRepoEvidenceFetcher,
     CachingSuggestionGenerator,
     SqliteCache,
 )
@@ -46,8 +48,9 @@ class AnalysisError:
 
 
 _RATE_LIMIT_MESSAGE = (
-    "GitHub's API rate limit is exhausted. It resets within the hour — try again "
-    "shortly, or run this with a GITHUB_TOKEN set for a much higher limit."
+    "GitHub's API rate limit is exhausted. Grounding claims reads each repo's code, "
+    "which is call-heavy — it resets within the hour, so try again shortly, or run "
+    "this with a GITHUB_TOKEN set for a much higher limit."
 )
 
 
@@ -60,8 +63,10 @@ def run_analysis(resume_text: str, username: str, config: Config) -> AnalysisRes
     error — it's the main case for our user.
     """
     github = GitHubClient(token=config.github_token)
+    cache = SqliteCache(config.cache_path)
     try:
         profile = github.fetch_profile(username)
+        evidence = CachingRepoEvidenceFetcher(github, cache=cache).fetch_repo_evidence(profile)
     except UserNotFoundError:
         return AnalysisError(f"No GitHub user found with the username '{username}'.", 404)
     except RateLimitError:
@@ -70,10 +75,10 @@ def run_analysis(resume_text: str, username: str, config: Config) -> AnalysisRes
         return AnalysisError(f"Couldn't fetch GitHub data right now: {exc}", 502)
 
     try:
-        cache = SqliteCache(config.cache_path)
         client = AnthropicClient(api_key=config.anthropic_api_key, model=config.anthropic_model)
         extractor = CachingClaimExtractor(client, cache=cache, model=config.anthropic_model)
-        report = build_gap_report(resume_text, profile, extractor)
+        verifier = CachingClaimVerifier(client, cache=cache, model=config.anthropic_model)
+        report = build_gap_report(resume_text, profile, evidence, extractor, verifier)
         suggester = CachingSuggestionGenerator(client, cache=cache, model=config.anthropic_model)
         plan = build_project_plan(report, profile, suggester)
     except AnthropicError as exc:

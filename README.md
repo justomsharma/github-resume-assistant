@@ -93,8 +93,17 @@ python -m resume_assistant.web.app
 ```
 
 `ANTHROPIC_API_KEY` is required; `GITHUB_TOKEN` is optional (a higher GitHub rate
-limit). The matcher is a shallow token match, so verdicts read as "not shown yet",
-never "false" — a signal, not proof.
+limit). Each claim is graded against your real repo code — parsed dependency
+manifests, the recursive file tree, language breakdown, and README — and earns one
+of three honest verdicts: **backed** (public code proves it, citing the specific
+files), **not shown yet** (a gap to close), or **not verifiable from public code**
+(claims like private/enterprise usage, traffic, or latency that public code
+structurally can't prove).
+
+> **Rate limits without a token.** Grounding reads each repo's code, so analysis
+> makes several GitHub calls per repo. Unauthenticated, a profile with many repos
+> can exhaust the rate limit — you'll get a friendly "set a `GITHUB_TOKEN`" message
+> rather than a crash. Setting a token raises the limit dramatically.
 
 ## Tech stack
 

@@ -15,6 +15,7 @@ from resume_assistant.clients.anthropic import (
     AnthropicError,
     build_extraction_messages,
     build_suggestion_messages,
+    build_verification_messages,
 )
 from resume_assistant.core.models import (
     Claim,
@@ -22,6 +23,7 @@ from resume_assistant.core.models import (
     GapReport,
     Profile,
     Repo,
+    RepoEvidence,
 )
 
 
@@ -29,24 +31,43 @@ def _gap_report(*, empty: bool) -> GapReport:
     """A small gap report with one gap and one backed claim."""
     return GapReport(
         profile_login="octocat",
-        supported=(
+        backed=(
             ClaimEvidence(
                 claim=Claim(text="Built a cache in Go"),
-                supported=True,
+                verdict="backed",
                 matching_repos=("go-cache",),
+                cited_files=("go-cache/src/cache.go",),
                 rationale="",
             ),
         ),
-        unsupported=(
+        not_shown=(
             ClaimEvidence(
                 claim=Claim(text="Proficient in React"),
-                supported=False,
+                verdict="not_shown",
                 matching_repos=(),
+                cited_files=(),
                 rationale="",
             ),
         ),
+        not_verifiable=(),
         github_is_empty=empty,
     )
+
+
+def _evidence() -> list[RepoEvidence]:
+    """One repo's code-level evidence for the verifier."""
+    return [
+        RepoEvidence(
+            repo_name="go-cache",
+            primary_language="Go",
+            language_breakdown=(("Go", 12000),),
+            dependencies=("github.com/redis/go-redis",),
+            notable_paths=("src/cache.go", "tests/cache_test.go"),
+            file_count=14,
+            readme_excerpt="# go-cache\nA distributed cache.",
+            pushed_at="2024-06-01T00:00:00Z",
+        )
+    ]
 
 
 def _profile(*, empty: bool) -> Profile:
@@ -357,3 +378,155 @@ def test_auth_error_is_not_retried(mocker: MockerFixture) -> None:
 
     assert instance.messages.create.call_count == 1  # permanent error, no retry
     sleep.assert_not_called()
+
+
+# --- verify_claims (v2.1) ----------------------------------------------------
+
+
+_CLAIMS = [
+    Claim(text="Built a distributed cache in Go", skills=("go",)),
+    Claim(text="Proficient in React", skills=("react",)),
+    Claim(text="Handled 300+ requests/day", skills=()),
+]
+
+
+def test_build_verification_messages_delimits_claims_and_evidence() -> None:
+    messages = build_verification_messages(_CLAIMS, _evidence())
+    content = messages[0]["content"]
+
+    assert "<claims>" in content and "</claims>" in content
+    assert "<evidence>" in content and "</evidence>" in content
+    assert "Built a distributed cache in Go" in content  # claim text verbatim
+    assert "go-cache" in content  # real repo grounds the grading
+    assert "github.com/redis/go-redis" in content  # parsed dependency is evidence
+
+
+def test_verify_claims_parses_three_verdicts(mocker: MockerFixture) -> None:
+    instance = _patch_sdk(mocker)
+    instance.messages.create.return_value = _text_response(
+        '{"verdicts": ['
+        '{"claim": "Built a distributed cache in Go", "verdict": "backed", '
+        '"cited_files": ["go-cache/src/cache.go"], "rationale": "LRU cache in cache.go"},'
+        '{"claim": "Proficient in React", "verdict": "not_shown", "cited_files": [], '
+        '"rationale": "no React code"},'
+        '{"claim": "Handled 300+ requests/day", "verdict": "not_verifiable", '
+        '"cited_files": [], "rationale": "traffic can\'t be shown in public code"}]}'
+    )
+
+    verdicts = AnthropicClient(api_key="k", model="claude-sonnet-5").verify_claims(
+        _CLAIMS, _evidence()
+    )
+
+    assert [v.verdict for v in verdicts] == ["backed", "not_shown", "not_verifiable"]
+    assert verdicts[0].cited_files == ("go-cache/src/cache.go",)
+    assert verdicts[0].matching_repos == ("go-cache",)  # derived from the cited file
+    assert verdicts[0].supported is True
+
+
+def test_verify_claims_uses_config_model_and_schema(mocker: MockerFixture) -> None:
+    instance = _patch_sdk(mocker)
+    instance.messages.create.return_value = _text_response('{"verdicts": []}')
+
+    AnthropicClient(api_key="k", model="claude-opus-4-8").verify_claims(_CLAIMS, _evidence())
+
+    kwargs = instance.messages.create.call_args.kwargs
+    assert kwargs["model"] == "claude-opus-4-8"  # model from config, not hardcoded
+    system = kwargs["system"].lower()
+    assert "return only a json object" in system  # schema instruction
+    assert "backed" in system and "not_shown" in system and "not_verifiable" in system
+    assert "cited_files" in kwargs["system"]  # must cite files to back a claim
+
+
+def test_verify_backed_without_cited_files_is_downgraded(mocker: MockerFixture) -> None:
+    instance = _patch_sdk(mocker)
+    instance.messages.create.return_value = _text_response(
+        '{"verdicts": [{"claim": "Built a distributed cache in Go", "verdict": "backed", '
+        '"cited_files": [], "rationale": "trust me"}]}'
+    )
+
+    verdicts = AnthropicClient(api_key="k", model="claude-sonnet-5").verify_claims(
+        [_CLAIMS[0]], _evidence()
+    )
+
+    # 'backed' with no cited file isn't grounded — it becomes an honest gap.
+    assert verdicts[0].verdict == "not_shown"
+
+
+def test_verify_unknown_verdict_and_missing_claim_default_to_not_shown(
+    mocker: MockerFixture,
+) -> None:
+    instance = _patch_sdk(mocker)
+    # First claim gets a garbage verdict; the others are omitted entirely.
+    instance.messages.create.return_value = _text_response(
+        '{"verdicts": [{"claim": "Built a distributed cache in Go", "verdict": "maybe"}]}'
+    )
+
+    verdicts = AnthropicClient(api_key="k", model="claude-sonnet-5").verify_claims(
+        _CLAIMS, _evidence()
+    )
+
+    assert len(verdicts) == 3  # one verdict per claim, in order
+    assert all(v.verdict == "not_shown" for v in verdicts)
+
+
+def test_verify_empty_claims_skips_api(mocker: MockerFixture) -> None:
+    instance = _patch_sdk(mocker)
+
+    verdicts = AnthropicClient(api_key="k", model="claude-sonnet-5").verify_claims([], _evidence())
+
+    assert verdicts == []
+    instance.messages.create.assert_not_called()
+
+
+def test_verify_no_evidence_defaults_all_not_shown_without_api(mocker: MockerFixture) -> None:
+    instance = _patch_sdk(mocker)
+
+    verdicts = AnthropicClient(api_key="k", model="claude-sonnet-5").verify_claims(_CLAIMS, [])
+
+    assert [v.verdict for v in verdicts] == ["not_shown", "not_shown", "not_shown"]
+    instance.messages.create.assert_not_called()  # nothing to grade against
+
+
+def test_verify_batches_evidence_and_merges_backed_wins(mocker: MockerFixture) -> None:
+    # Force two batches by shrinking the char budget below one repo's rendered size.
+    mocker.patch("resume_assistant.clients.anthropic._EVIDENCE_CHAR_BUDGET", 10)
+    instance = _patch_sdk(mocker)
+    # Batch 1 backs the claim; batch 2 says not_shown. Merge must keep 'backed'.
+    instance.messages.create.side_effect = [
+        _text_response(
+            '{"verdicts": [{"claim": "Built a distributed cache in Go", "verdict": "backed", '
+            '"cited_files": ["repo-a/cache.go"], "rationale": "found it"}]}'
+        ),
+        _text_response(
+            '{"verdicts": [{"claim": "Built a distributed cache in Go", "verdict": "not_shown", '
+            '"cited_files": [], "rationale": "not here"}]}'
+        ),
+    ]
+    two_repos = _evidence() + [
+        RepoEvidence(
+            repo_name="repo-b",
+            primary_language="Go",
+            language_breakdown=(("Go", 10),),
+            dependencies=(),
+            notable_paths=(),
+            file_count=1,
+            readme_excerpt="other",
+            pushed_at=None,
+        )
+    ]
+
+    verdicts = AnthropicClient(api_key="k", model="claude-sonnet-5").verify_claims(
+        [_CLAIMS[0]], two_repos
+    )
+
+    assert instance.messages.create.call_count == 2  # one call per batch
+    assert verdicts[0].verdict == "backed"  # backed in any batch wins the merge
+    assert verdicts[0].cited_files == ("repo-a/cache.go",)
+
+
+def test_verify_unparseable_raises(mocker: MockerFixture) -> None:
+    instance = _patch_sdk(mocker)
+    instance.messages.create.return_value = _text_response("not json at all")
+
+    with pytest.raises(AnthropicError):
+        AnthropicClient(api_key="k", model="claude-sonnet-5").verify_claims(_CLAIMS, _evidence())
