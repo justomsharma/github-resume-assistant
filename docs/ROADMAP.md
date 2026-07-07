@@ -28,12 +28,12 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started
 
 **Goal:** turn raw GitHub data into insight about the resume.
 
-- ⬜ `analyze_resume(resume_text)` implemented
-- ⬜ Extracts the strongest *claims* from the resume
-- ⬜ Cross-references claims against `fetch_github_repos` output
-- ⬜ Produces a **gap report**: which claims have public evidence, which don't
-- ⬜ Uses the Anthropic API *inside the server* for the analysis
-- ⬜ SQLite caching so repeated calls don't re-hit APIs
+- ✅ `analyze_resume(resume_text)` implemented
+- ✅ Extracts the strongest *claims* from the resume
+- ✅ Cross-references claims against `fetch_github_repos` output
+- ✅ Produces a **gap report**: which claims have public evidence, which don't
+- ✅ Uses the Anthropic API *inside the server* for the analysis
+- ✅ SQLite caching so repeated calls don't re-hit APIs
 
 **Deliverable:** Claude can tell you which resume claims your GitHub does/doesn't back up.
 
