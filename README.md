@@ -1,5 +1,7 @@
 # GitHub Resume Assistant
 
+[![CI](https://github.com/justomsharma/github-resume-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/justomsharma/github-resume-assistant/actions/workflows/ci.yml)
+
 An MCP server that connects Claude to your real GitHub activity and tells you
 **what to build and ship publicly to make your resume credible** — grounded in
 your actual contribution history, not generic advice.
@@ -24,10 +26,15 @@ bridging Claude to the GitHub API. Full rationale in [`docs/PRODUCT.md`](docs/PR
 
 ## Status
 
-Early development. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what each version
-includes. Shipped: **v0.1 — walking skeleton** (`fetch_github_repos`),
-**v0.2 — the gap finder** (`analyze_resume`), and **v0.3 — the prescription**
-(`suggest_projects`). v0.3 is the v1 milestone.
+**v1.0 — shipped.** All three tools work end-to-end, and the repo is production-
+polished: retry/backoff and rate-limit handling on the GitHub API, config via env
+vars, a test suite passing in CI (ruff + mypy + pytest), and a Docker image that
+builds. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what each version includes and
+[`docs/WRITEUP.md`](docs/WRITEUP.md) for the short story of why it's built this way.
+
+Shipped: **v0.1** walking skeleton (`fetch_github_repos`), **v0.2** the gap finder
+(`analyze_resume`), **v0.3** the prescription (`suggest_projects`), and **v1.0**
+production polish.
 
 ## What `analyze_resume` does (v0.2)
 
@@ -68,7 +75,7 @@ paste your resume + username.
 ## Tech stack
 
 - Python 3.11+ with the official `mcp` library
-- GitHub REST API (`requests` / `aiohttp`)
+- GitHub REST API (`requests`)
 - Anthropic API (latest Claude models — `claude-sonnet-5` / `claude-opus-4-8`)
 - SQLite for caching (from v0.2)
 - pytest for testing, ruff + mypy for quality
@@ -140,6 +147,51 @@ not rely on the script, use your interpreter directly instead:
 Fully quit and reopen Claude Desktop, then ask: **"show me the GitHub repos for
 octocat"** — Claude will call `fetch_github_repos` and return the real data.
 
+## Run with Docker
+
+Prefer not to manage a local Python environment? Build the image and run the
+server in a container. Secrets are passed at runtime — never baked into the image.
+
+```bash
+# Build
+docker build -t resume-assistant .
+
+# Run (the server speaks MCP over stdio, so keep STDIN open with -i)
+docker run -i --rm \
+  -e GITHUB_TOKEN=your_github_token_here \
+  -e ANTHROPIC_API_KEY=your_anthropic_key_here \
+  resume-assistant
+```
+
+> The SQLite cache lives inside the container and is discarded when it exits
+> (`--rm`). To persist it across runs, mount a volume and point `CACHE_PATH` at
+> it, e.g. `-v resume-cache:/app/.cache -e CACHE_PATH=/app/.cache/resume.db`.
+
+To use the container from Claude Desktop, set the command to `docker`:
+
+```jsonc
+{
+  "mcpServers": {
+    "github-resume-assistant": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "GITHUB_TOKEN",
+        "-e", "ANTHROPIC_API_KEY",
+        "resume-assistant"
+      ],
+      "env": {
+        "GITHUB_TOKEN": "your_github_token_here",
+        "ANTHROPIC_API_KEY": "your_anthropic_key_here"
+      }
+    }
+  }
+}
+```
+
+Passing `-e GITHUB_TOKEN` (no `=value`) forwards the variable from the `env`
+block above into the container, keeping the token out of the args list.
+
 ## For contributors (and future you)
 
 This repo is built with a strict, self-enforcing workflow. If you use Claude Code
@@ -160,4 +212,4 @@ The rule: **no code before the approach is validated.** See the docs:
 
 ## License
 
-MIT (add a LICENSE file before going public).
+MIT — see [`LICENSE`](LICENSE).
