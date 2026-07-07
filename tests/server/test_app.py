@@ -10,7 +10,7 @@ from pytest_mock import MockerFixture
 from resume_assistant.clients.anthropic import AnthropicError
 from resume_assistant.clients.github import GitHubError, UserNotFoundError
 from resume_assistant.config import Config
-from resume_assistant.core.models import Claim, Profile, Repo
+from resume_assistant.core.models import Claim, Profile, Repo, Suggestion
 from resume_assistant.server import app
 
 
@@ -18,7 +18,7 @@ def test_tools_registered_with_schema() -> None:
     tools = asyncio.run(app.mcp.list_tools())
     by_name = {t.name: t for t in tools}
 
-    assert set(by_name) == {"fetch_github_repos", "analyze_resume"}
+    assert set(by_name) == {"fetch_github_repos", "analyze_resume", "suggest_projects"}
 
     fetch = by_name["fetch_github_repos"]
     assert fetch.description
@@ -28,6 +28,11 @@ def test_tools_registered_with_schema() -> None:
     assert analyze.description  # a description exists for Claude to reason over
     assert set(analyze.inputSchema["properties"]) == {"resume_text", "username"}
     assert set(analyze.inputSchema["required"]) == {"resume_text", "username"}
+
+    suggest = by_name["suggest_projects"]
+    assert suggest.description
+    assert set(suggest.inputSchema["properties"]) == {"resume_text", "username"}
+    assert set(suggest.inputSchema["required"]) == {"resume_text", "username"}
 
 
 def _fetch(username: str) -> str:
@@ -220,3 +225,112 @@ def test_analyze_anthropic_error_friendly_message(
     result = app.analyze_resume("some resume", "octocat")
 
     assert "Couldn't analyze the resume right now" in result
+
+
+# --- suggest_projects (v0.3) -------------------------------------------------
+
+
+def _suggestion(proves: str, size: str, title: str) -> Suggestion:
+    return Suggestion(
+        title=title,
+        what_to_build="Build the thing and ship it.",
+        proves_claim=proves,
+        skills=("go",),
+        size=size,
+        skip="auth and polish",
+    )
+
+
+def _patch_anthropic(
+    mocker: MockerFixture, claims: list[Claim], suggestions: list[Suggestion]
+) -> None:
+    """Patch AnthropicClient so both extract_claims and generate_suggestions are stubbed."""
+    instance = mocker.patch.object(app, "AnthropicClient").return_value
+    instance.extract_claims.return_value = claims
+    instance.generate_suggestions.return_value = suggestions
+
+
+def test_suggest_blank_inputs_handled(mocker: MockerFixture) -> None:
+    client = mocker.patch.object(app, "GitHubClient")
+
+    assert "provide the resume text" in app.suggest_projects("   ", "octocat")
+    assert "provide a GitHub username" in app.suggest_projects("Built X.", "  ")
+    client.assert_not_called()  # never hits the network for blank input
+
+
+def test_suggest_happy_path_formats_ranked_plan(
+    mocker: MockerFixture, tmp_path: Path, profile_with_repos: Profile
+) -> None:
+    _patch_config(mocker, tmp_path, api_key="k")
+    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = (
+        profile_with_repos
+    )
+    _patch_anthropic(
+        mocker,
+        claims=[
+            Claim(text="Built a cache in Go", skills=("go",), category="project"),
+            Claim(text="Proficient in React", skills=("react",), category="skill"),
+        ],
+        suggestions=[
+            _suggestion("Built a cache in Go", "a week", title="Reinforce cache"),
+            _suggestion("Proficient in React", "a weekend", title="Ship a React app"),
+        ],
+    )
+
+    result = app.suggest_projects("some resume", "octocat")
+
+    assert "30-day build plan for @octocat" in result
+    # React is the gap (unsupported) → ranked first over the already-backed Go claim.
+    assert result.index("Ship a React app") < result.index("Reinforce cache")
+    assert "Skip to ship it:" in result
+    assert "a weekend" in result
+
+
+def test_suggest_empty_github_still_prescribes(
+    mocker: MockerFixture, tmp_path: Path, empty_profile: Profile
+) -> None:
+    _patch_config(mocker, tmp_path, api_key="k")
+    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = (
+        empty_profile
+    )
+    _patch_anthropic(
+        mocker,
+        claims=[Claim(text="Built a cache in Go", skills=("go",), category="project")],
+        suggestions=[_suggestion("Built a cache in Go", "a weekend", title="Cache demo")],
+    )
+
+    result = app.suggest_projects("some resume", "newgrad")
+
+    assert "no public repositories yet" in result  # empty case framed, not an error
+    assert "Cache demo" in result  # still prescribes buildable ideas, not "nothing"
+
+
+def test_suggest_thin_resume_degrades_gracefully(
+    mocker: MockerFixture, tmp_path: Path, empty_profile: Profile
+) -> None:
+    """No claims and empty GitHub → guide the user, don't crash or fabricate."""
+    _patch_config(mocker, tmp_path, api_key="k")
+    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = (
+        empty_profile
+    )
+    _patch_anthropic(mocker, claims=[], suggestions=[])
+
+    result = app.suggest_projects("thin resume", "newgrad")
+
+    assert "No concrete, verifiable claims" in result
+    assert "run this again" in result
+
+
+def test_suggest_anthropic_error_friendly_message(
+    mocker: MockerFixture, tmp_path: Path, profile_with_repos: Profile
+) -> None:
+    _patch_config(mocker, tmp_path, api_key="k")
+    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = (
+        profile_with_repos
+    )
+    instance = mocker.patch.object(app, "AnthropicClient").return_value
+    instance.extract_claims.side_effect = AnthropicError("rate limited")
+
+    result = app.suggest_projects("some resume", "octocat")
+
+    assert "Couldn't build suggestions right now" in result

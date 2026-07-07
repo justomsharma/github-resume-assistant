@@ -9,7 +9,11 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
-from resume_assistant.cache.store import CachingClaimExtractor, SqliteCache
+from resume_assistant.cache.store import (
+    CachingClaimExtractor,
+    CachingSuggestionGenerator,
+    SqliteCache,
+)
 from resume_assistant.clients.anthropic import AnthropicClient, AnthropicError
 from resume_assistant.clients.github import (
     GitHubClient,
@@ -19,7 +23,15 @@ from resume_assistant.clients.github import (
 )
 from resume_assistant.config import load_config
 from resume_assistant.core.analysis import build_gap_report
-from resume_assistant.core.models import ClaimEvidence, GapReport, Profile, Repo
+from resume_assistant.core.models import (
+    ClaimEvidence,
+    GapReport,
+    Profile,
+    ProjectPlan,
+    Repo,
+    Suggestion,
+)
+from resume_assistant.core.suggestions import build_project_plan
 
 mcp = FastMCP("github-resume-assistant")
 
@@ -105,6 +117,59 @@ def analyze_resume(resume_text: str, username: str) -> str:
     return format_gap_report(report)
 
 
+@mcp.tool()
+def suggest_projects(resume_text: str, username: str) -> str:
+    """Prescribe a ranked 30-day plan of projects to make a resume credible.
+
+    Builds the resume-vs-GitHub gap report, then prescribes specific, shippable
+    projects to close the highest-value gaps: each is tied to a concrete resume
+    claim it would prove, sized ("a weekend" / "a week"), and scoped (what to skip).
+    This is the star tool — the prescription, not just the diagnosis. Handles an
+    empty or thin GitHub as the main case: it prescribes what to build from scratch
+    rather than reporting that there's nothing to show.
+
+    Args:
+        resume_text: The full text of the resume to ground suggestions in.
+        username: The GitHub login whose public repos ground the analysis.
+    """
+    resume_text = resume_text.strip()
+    username = username.strip()
+    if not resume_text:
+        return "Please provide the resume text to build suggestions from."
+    if not username:
+        return "Please provide a GitHub username to ground the suggestions."
+
+    config = load_config()
+    github = GitHubClient(token=config.github_token)
+    try:
+        profile = github.fetch_profile(username)
+    except UserNotFoundError:
+        return f"No GitHub user found with the username '{username}'."
+    except RateLimitError:
+        return (
+            "GitHub's API rate limit is exhausted. Set a GITHUB_TOKEN in your "
+            "environment for a much higher limit, then try again."
+        )
+    except GitHubError as exc:
+        return f"Couldn't fetch GitHub data right now: {exc}"
+
+    try:
+        cache = SqliteCache(config.cache_path)
+        client = AnthropicClient(
+            api_key=config.anthropic_api_key, model=config.anthropic_model
+        )
+        extractor = CachingClaimExtractor(client, cache=cache, model=config.anthropic_model)
+        report = build_gap_report(resume_text, profile, extractor)
+        suggester = CachingSuggestionGenerator(
+            client, cache=cache, model=config.anthropic_model
+        )
+        plan = build_project_plan(report, profile, suggester)
+    except AnthropicError as exc:
+        return f"Couldn't build suggestions right now: {exc}"
+
+    return format_project_plan(plan)
+
+
 def format_gap_report(report: GapReport) -> str:
     """Render a GapReport into readable Markdown for Claude to present."""
     lines = [
@@ -147,6 +212,51 @@ def format_gap_report(report: GapReport) -> str:
         ]
 
     return "\n".join(lines)
+
+
+def format_project_plan(plan: ProjectPlan) -> str:
+    """Render a ProjectPlan into a readable Markdown 30-day plan for Claude to present."""
+    lines = [f"# 30-day build plan for @{plan.profile_login}", ""]
+
+    if plan.github_is_empty:
+        lines += [
+            f"**@{plan.profile_login} has no public repositories yet** — the common "
+            "case when real work lives in private company repos. Every project below is "
+            "a way to make a resume claim publicly credible, starting from scratch.",
+            "",
+        ]
+
+    if not plan.suggestions:
+        lines += [
+            "No concrete, verifiable claims were found to ground suggestions on. Add "
+            "specific projects, technologies, and outcomes to your resume, then run "
+            "this again to get a build plan.",
+        ]
+        return "\n".join(lines)
+
+    lines.append(
+        f"Ranked by impact — gaps first, quicker wins earlier. "
+        f"{len(plan.suggestions)} project(s):"
+    )
+    lines.append("")
+    for index, suggestion in enumerate(plan.suggestions, start=1):
+        lines.append(_format_suggestion(index, suggestion))
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
+
+
+def _format_suggestion(index: int, suggestion: Suggestion) -> str:
+    """Render one ranked suggestion as a Markdown block."""
+    skills = ", ".join(suggestion.skills) if suggestion.skills else "—"
+    parts = [
+        f"## {index}. {suggestion.title} ({suggestion.size})",
+        suggestion.what_to_build,
+        f"- **Proves:** {suggestion.proves_claim or 'a claimed skill'}",
+        f"- **Skills shown:** {skills}",
+        f"- **Skip to ship it:** {suggestion.skip or 'anything not core to the demo'}",
+    ]
+    return "\n".join(parts)
 
 
 def _format_evidence(evidence: ClaimEvidence) -> str:
