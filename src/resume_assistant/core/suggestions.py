@@ -24,9 +24,7 @@ _UNKNOWN_SIZE_RANK = 2
 class SuggestionGenerator(Protocol):
     """Anything that can propose candidate projects (implemented by AnthropicClient)."""
 
-    def generate_suggestions(
-        self, gap_report: GapReport, profile: Profile
-    ) -> list[Suggestion]: ...
+    def generate_suggestions(self, gap_report: GapReport, profile: Profile) -> list[Suggestion]: ...
 
 
 def build_project_plan(
@@ -42,9 +40,7 @@ def build_project_plan(
     )
 
 
-def _rank_suggestions(
-    suggestions: list[Suggestion], gap_report: GapReport
-) -> list[Suggestion]:
+def _rank_suggestions(suggestions: list[Suggestion], gap_report: GapReport) -> list[Suggestion]:
     """Order suggestions so the highest-value, quickest work comes first.
 
     Ranking is deterministic and explainable:

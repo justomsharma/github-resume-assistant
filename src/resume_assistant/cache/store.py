@@ -100,9 +100,7 @@ class CachingClaimExtractor:
 class SuggestionGeneratorProtocol(Protocol):
     """Structural stand-in: anything that proposes candidate projects for a gap report."""
 
-    def generate_suggestions(
-        self, gap_report: GapReport, profile: Profile
-    ) -> list[Suggestion]: ...
+    def generate_suggestions(self, gap_report: GapReport, profile: Profile) -> list[Suggestion]: ...
 
 
 class CachingSuggestionGenerator:
@@ -115,16 +113,12 @@ class CachingSuggestionGenerator:
     Satisfies ``core.suggestions.SuggestionGenerator`` structurally.
     """
 
-    def __init__(
-        self, inner: SuggestionGeneratorProtocol, cache: SqliteCache, model: str
-    ) -> None:
+    def __init__(self, inner: SuggestionGeneratorProtocol, cache: SqliteCache, model: str) -> None:
         self._inner = inner
         self._cache = cache
         self._model = model
 
-    def generate_suggestions(
-        self, gap_report: GapReport, profile: Profile
-    ) -> list[Suggestion]:
+    def generate_suggestions(self, gap_report: GapReport, profile: Profile) -> list[Suggestion]:
         """Return cached candidates for this gap report, or generate and cache them."""
         key = self._key(gap_report)
         cached = self._cache.get(key)
@@ -153,10 +147,7 @@ class CachingSuggestionGenerator:
 def _serialize_claims(claims: list[Claim]) -> str:
     """Serialize claims to a JSON string for storage."""
     return json.dumps(
-        [
-            {"text": c.text, "skills": list(c.skills), "category": c.category}
-            for c in claims
-        ]
+        [{"text": c.text, "skills": list(c.skills), "category": c.category} for c in claims]
     )
 
 

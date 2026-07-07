@@ -104,8 +104,7 @@ def test_missing_api_key_raises_auth_error() -> None:
 def test_extract_claims_parses_json(mocker: MockerFixture) -> None:
     instance = _patch_sdk(mocker)
     instance.messages.create.return_value = _text_response(
-        '{"claims": [{"text": "Built a cache in Go", "skills": ["Go"], '
-        '"category": "project"}]}'
+        '{"claims": [{"text": "Built a cache in Go", "skills": ["Go"], "category": "project"}]}'
     )
 
     claims = AnthropicClient(api_key="k", model="claude-sonnet-5").extract_claims("resume")

@@ -25,9 +25,7 @@ class ClaimExtractor(Protocol):
     def extract_claims(self, resume_text: str) -> list[Claim]: ...
 
 
-def build_gap_report(
-    resume_text: str, profile: Profile, extractor: ClaimExtractor
-) -> GapReport:
+def build_gap_report(resume_text: str, profile: Profile, extractor: ClaimExtractor) -> GapReport:
     """Cross-reference the resume's claims against the profile's public repos."""
     claims = extractor.extract_claims(resume_text)
     github_is_empty = not profile.has_public_repos
@@ -92,7 +90,5 @@ def _skills_match_repo(skills: tuple[str, ...], repo: Repo) -> bool:
 
 def _repo_tokens(repo: Repo) -> set[str]:
     """Lowercased word tokens from a repo's language, name, and description."""
-    text = " ".join(
-        part for part in (repo.primary_language, repo.name, repo.description) if part
-    )
+    text = " ".join(part for part in (repo.primary_language, repo.name, repo.description) if part)
     return set(_TOKEN.findall(text.lower()))

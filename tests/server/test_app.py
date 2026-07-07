@@ -151,9 +151,9 @@ def test_analyze_happy_path_formats_gap_report(
     mocker: MockerFixture, tmp_path: Path, profile_with_repos: Profile
 ) -> None:
     _patch_config(mocker, tmp_path, api_key="k")
-    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = (
-        profile_with_repos
-    )
+    mocker.patch.object(
+        app, "GitHubClient"
+    ).return_value.fetch_profile.return_value = profile_with_repos
     mocker.patch.object(app, "AnthropicClient").return_value.extract_claims.return_value = [
         Claim(text="Built a cache in Go", skills=("go",), category="project"),
         Claim(text="Proficient in React", skills=("react",), category="skill"),
@@ -172,9 +172,7 @@ def test_analyze_empty_github_degrades_gracefully(
     mocker: MockerFixture, tmp_path: Path, empty_profile: Profile
 ) -> None:
     _patch_config(mocker, tmp_path, api_key="k")
-    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = (
-        empty_profile
-    )
+    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = empty_profile
     mocker.patch.object(app, "AnthropicClient").return_value.extract_claims.return_value = [
         Claim(text="Built a cache in Go", skills=("go",), category="project"),
     ]
@@ -190,9 +188,9 @@ def test_analyze_missing_key_friendly_message(
     mocker: MockerFixture, tmp_path: Path, profile_with_repos: Profile
 ) -> None:
     _patch_config(mocker, tmp_path, api_key=None)
-    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = (
-        profile_with_repos
-    )
+    mocker.patch.object(
+        app, "GitHubClient"
+    ).return_value.fetch_profile.return_value = profile_with_repos
 
     result = app.analyze_resume("some resume", "octocat")
 
@@ -202,9 +200,9 @@ def test_analyze_missing_key_friendly_message(
 
 def test_analyze_unknown_user_friendly_message(mocker: MockerFixture, tmp_path: Path) -> None:
     _patch_config(mocker, tmp_path, api_key="k")
-    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.side_effect = (
-        UserNotFoundError("404")
-    )
+    mocker.patch.object(
+        app, "GitHubClient"
+    ).return_value.fetch_profile.side_effect = UserNotFoundError("404")
 
     result = app.analyze_resume("some resume", "ghost")
 
@@ -215,12 +213,12 @@ def test_analyze_anthropic_error_friendly_message(
     mocker: MockerFixture, tmp_path: Path, profile_with_repos: Profile
 ) -> None:
     _patch_config(mocker, tmp_path, api_key="k")
-    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = (
-        profile_with_repos
-    )
-    mocker.patch.object(app, "AnthropicClient").return_value.extract_claims.side_effect = (
-        AnthropicError("rate limited")
-    )
+    mocker.patch.object(
+        app, "GitHubClient"
+    ).return_value.fetch_profile.return_value = profile_with_repos
+    mocker.patch.object(
+        app, "AnthropicClient"
+    ).return_value.extract_claims.side_effect = AnthropicError("rate limited")
 
     result = app.analyze_resume("some resume", "octocat")
 
@@ -262,9 +260,9 @@ def test_suggest_happy_path_formats_ranked_plan(
     mocker: MockerFixture, tmp_path: Path, profile_with_repos: Profile
 ) -> None:
     _patch_config(mocker, tmp_path, api_key="k")
-    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = (
-        profile_with_repos
-    )
+    mocker.patch.object(
+        app, "GitHubClient"
+    ).return_value.fetch_profile.return_value = profile_with_repos
     _patch_anthropic(
         mocker,
         claims=[
@@ -290,9 +288,7 @@ def test_suggest_empty_github_still_prescribes(
     mocker: MockerFixture, tmp_path: Path, empty_profile: Profile
 ) -> None:
     _patch_config(mocker, tmp_path, api_key="k")
-    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = (
-        empty_profile
-    )
+    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = empty_profile
     _patch_anthropic(
         mocker,
         claims=[Claim(text="Built a cache in Go", skills=("go",), category="project")],
@@ -310,9 +306,7 @@ def test_suggest_thin_resume_degrades_gracefully(
 ) -> None:
     """No claims and empty GitHub → guide the user, don't crash or fabricate."""
     _patch_config(mocker, tmp_path, api_key="k")
-    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = (
-        empty_profile
-    )
+    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = empty_profile
     _patch_anthropic(mocker, claims=[], suggestions=[])
 
     result = app.suggest_projects("thin resume", "newgrad")
@@ -325,9 +319,9 @@ def test_suggest_anthropic_error_friendly_message(
     mocker: MockerFixture, tmp_path: Path, profile_with_repos: Profile
 ) -> None:
     _patch_config(mocker, tmp_path, api_key="k")
-    mocker.patch.object(app, "GitHubClient").return_value.fetch_profile.return_value = (
-        profile_with_repos
-    )
+    mocker.patch.object(
+        app, "GitHubClient"
+    ).return_value.fetch_profile.return_value = profile_with_repos
     instance = mocker.patch.object(app, "AnthropicClient").return_value
     instance.extract_claims.side_effect = AnthropicError("rate limited")
 

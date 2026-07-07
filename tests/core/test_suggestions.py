@@ -42,9 +42,7 @@ class FakeSuggester:
     def __init__(self, suggestions: list[Suggestion]) -> None:
         self._suggestions = suggestions
 
-    def generate_suggestions(
-        self, gap_report: GapReport, profile: Profile
-    ) -> list[Suggestion]:
+    def generate_suggestions(self, gap_report: GapReport, profile: Profile) -> list[Suggestion]:
         return self._suggestions
 
 

@@ -155,14 +155,10 @@ def suggest_projects(resume_text: str, username: str) -> str:
 
     try:
         cache = SqliteCache(config.cache_path)
-        client = AnthropicClient(
-            api_key=config.anthropic_api_key, model=config.anthropic_model
-        )
+        client = AnthropicClient(api_key=config.anthropic_api_key, model=config.anthropic_model)
         extractor = CachingClaimExtractor(client, cache=cache, model=config.anthropic_model)
         report = build_gap_report(resume_text, profile, extractor)
-        suggester = CachingSuggestionGenerator(
-            client, cache=cache, model=config.anthropic_model
-        )
+        suggester = CachingSuggestionGenerator(client, cache=cache, model=config.anthropic_model)
         plan = build_project_plan(report, profile, suggester)
     except AnthropicError as exc:
         return f"Couldn't build suggestions right now: {exc}"
@@ -197,9 +193,7 @@ def format_gap_report(report: GapReport) -> str:
 
     if report.unsupported:
         heading = (
-            "## Claims to make credible"
-            if report.github_is_empty
-            else "## Not yet backed publicly"
+            "## Claims to make credible" if report.github_is_empty else "## Not yet backed publicly"
         )
         lines += ["", heading, ""]
         lines += [_format_evidence(e) for e in report.unsupported]
@@ -235,8 +229,7 @@ def format_project_plan(plan: ProjectPlan) -> str:
         return "\n".join(lines)
 
     lines.append(
-        f"Ranked by impact — gaps first, quicker wins earlier. "
-        f"{len(plan.suggestions)} project(s):"
+        f"Ranked by impact — gaps first, quicker wins earlier. {len(plan.suggestions)} project(s):"
     )
     lines.append("")
     for index, suggestion in enumerate(plan.suggestions, start=1):
