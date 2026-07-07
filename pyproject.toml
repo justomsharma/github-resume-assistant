@@ -13,6 +13,7 @@ dependencies = [
     "mcp>=1.2.0",
     "requests>=2.31",
     "anthropic>=0.40",
+    "flask>=3.0",
 ]
 
 [project.optional-dependencies]
@@ -28,9 +29,13 @@ dev = [
 
 [project.scripts]
 resume-assistant = "resume_assistant.server.app:main"
+resume-assistant-web = "resume_assistant.web.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+resume_assistant = ["web/templates/*.html", "web/static/*"]
 
 [tool.ruff]
 line-length = 100

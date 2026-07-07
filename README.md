@@ -72,9 +72,29 @@ in SQLite so re-running the same gap report doesn't re-hit the Anthropic API.
 In Claude Desktop, ask: **"what should I build to make my resume credible?"** and
 paste your resume + username.
 
+## The web app (v2.0 — no install)
+
+The same engine, a second front door. Job-seekers don't install MCP servers, so
+`resume_assistant/web/` is a thin Flask adapter over the identical `core/` logic
+(`build_gap_report` + `build_project_plan`): paste your resume, type a GitHub
+username, and get the gap report + ranked 30-day plan as a web page. The
+empty-GitHub case is the main case — it renders a build plan, not "nothing found".
+
+Run it locally:
+
+```bash
+# after `pip install -e ".[dev]"` and setting ANTHROPIC_API_KEY (see below)
+resume-assistant-web
+# then open http://127.0.0.1:5000
+```
+
+`ANTHROPIC_API_KEY` is required; `GITHUB_TOKEN` is optional (a higher GitHub rate
+limit). The matcher is a shallow token match, so verdicts read as "not shown yet",
+never "false" — a signal, not proof.
+
 ## Tech stack
 
-- Python 3.11+ with the official `mcp` library
+- Python 3.11+ with the official `mcp` library (and Flask for the v2.0 web app)
 - GitHub REST API (`requests`)
 - Anthropic API (latest Claude models — `claude-sonnet-5` / `claude-opus-4-8`)
 - SQLite for caching (from v0.2)
