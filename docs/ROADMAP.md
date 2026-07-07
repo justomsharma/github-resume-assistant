@@ -59,8 +59,8 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started
 
 **Goal:** something you'd link in a job application.
 
-- ⬜ Error handling + retry/backoff on GitHub and Anthropic calls
-- ⬜ Rate-limit handling for the GitHub API
+- ✅ Error handling + retry/backoff on GitHub and Anthropic calls
+- ✅ Rate-limit handling for the GitHub API
 - ⬜ Config via env vars (`GITHUB_TOKEN`, `ANTHROPIC_API_KEY`)
 - ⬜ Full README with setup + Claude Desktop config instructions
 - ✅ Test suite passing in CI (GitHub Actions)
