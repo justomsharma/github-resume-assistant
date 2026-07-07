@@ -64,7 +64,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started
 - ⬜ Config via env vars (`GITHUB_TOKEN`, `ANTHROPIC_API_KEY`)
 - ⬜ Full README with setup + Claude Desktop config instructions
 - ✅ Test suite passing in CI (GitHub Actions)
-- ⬜ Docker image builds
+- ✅ Docker image builds
 - ⬜ Public GitHub repo with docs and a short write-up
 
 **Deliverable:** shareable, documented, tested MCP server.
