@@ -19,8 +19,14 @@ from resume_assistant.core.models import Profile, Repo
 _API_ROOT = "https://api.github.com"
 _PER_PAGE = 100  # GitHub caps page size at 100.
 _MAX_RETRIES = 3
-_BACKOFF_SECONDS = 1.0
+# Exponential backoff for transient errors: delay = base * 2**attempt, matching
+# the Anthropic client's convention (clients/anthropic.py).
+_BACKOFF_BASE_SECONDS = 1.0
 _TIMEOUT_SECONDS = 15
+# Longest Retry-After we'll wait out before raising instead. Short secondary
+# rate limits (seconds) are worth retrying; a long/primary limit (up to an hour)
+# would hang the MCP call, so we surface a friendly error instead.
+_MAX_RETRY_AFTER_SECONDS = 60
 
 
 class GitHubError(RuntimeError):
@@ -32,7 +38,11 @@ class UserNotFoundError(GitHubError):
 
 
 class RateLimitError(GitHubError):
-    """Raised when the GitHub rate limit is exhausted (HTTP 403 with no remaining)."""
+    """Raised on a GitHub rate limit that isn't worth waiting out.
+
+    Covers a primary limit (403/429 with ``X-RateLimit-Remaining: 0``) and a
+    secondary limit whose ``Retry-After`` exceeds ``_MAX_RETRY_AFTER_SECONDS``.
+    """
 
 
 class GitHubClient:
@@ -83,18 +93,22 @@ class GitHubClient:
                 response = self._session.get(url, params=params, timeout=_TIMEOUT_SECONDS)
             except requests.RequestException as exc:
                 last_exc = exc
-                time.sleep(_BACKOFF_SECONDS * (attempt + 1))
+                time.sleep(_BACKOFF_BASE_SECONDS * 2**attempt)
                 continue
 
             if response.status_code == 404:
                 raise UserNotFoundError(f"GitHub returned 404 for {url}")
-            if response.status_code == 403 and _is_rate_limited(response):
-                raise RateLimitError(
-                    "GitHub API rate limit exceeded. Set GITHUB_TOKEN for a higher limit."
-                )
+            if _is_rate_limited(response):
+                # A short secondary limit (Retry-After within cap) is worth waiting
+                # out and retrying; a long or primary limit is surfaced as an error.
+                retry_after = _retry_after_seconds(response)
+                if retry_after is not None and retry_after <= _MAX_RETRY_AFTER_SECONDS:
+                    time.sleep(retry_after)
+                    continue
+                raise RateLimitError(_rate_limit_message(response, retry_after))
             if response.status_code >= 500:
                 # Transient server error — retry with backoff.
-                time.sleep(_BACKOFF_SECONDS * (attempt + 1))
+                time.sleep(_BACKOFF_BASE_SECONDS * 2**attempt)
                 continue
             if not response.ok:
                 raise GitHubError(f"GitHub request failed ({response.status_code}): {url}")
@@ -102,12 +116,46 @@ class GitHubClient:
 
         if last_exc is not None:
             raise GitHubError(f"GitHub request failed after retries: {url}") from last_exc
-        raise GitHubError(f"GitHub request failed after retries (server error): {url}")
+        # Retries exhausted while backing off a short secondary rate limit or 5xx.
+        raise GitHubError(f"GitHub request failed after {_MAX_RETRIES} retries: {url}")
 
 
 def _is_rate_limited(response: requests.Response) -> bool:
-    """True when a 403 is due to an exhausted rate limit rather than another forbidden reason."""
-    return response.headers.get("X-RateLimit-Remaining") == "0"
+    """True when a 403/429 is a rate limit rather than another forbidden reason.
+
+    GitHub signals a rate limit two ways: the primary limit exhausts
+    ``X-RateLimit-Remaining`` to ``0``, while secondary limits reply with a
+    ``Retry-After`` header. Either, on a 403 or 429, means we're throttled.
+    """
+    if response.status_code not in (403, 429):
+        return False
+    return response.headers.get("X-RateLimit-Remaining") == "0" or "Retry-After" in response.headers
+
+
+def _retry_after_seconds(response: requests.Response) -> int | None:
+    """Parse the ``Retry-After`` header as whole seconds, if present and numeric.
+
+    GitHub sends ``Retry-After`` as an integer number of seconds for secondary
+    rate limits. A missing or non-numeric value returns ``None``.
+    """
+    value = response.headers.get("Retry-After")
+    if value is None:
+        return None
+    try:
+        return int(value.strip())
+    except ValueError:
+        return None
+
+
+def _rate_limit_message(response: requests.Response, retry_after: int | None) -> str:
+    """Build a friendly rate-limit error, noting the wait time and the token hint."""
+    hint = "Set GITHUB_TOKEN for a much higher limit, then try again."
+    if retry_after is not None:
+        return f"GitHub rate limit hit; retry after {retry_after}s. {hint}"
+    reset = response.headers.get("X-RateLimit-Reset")
+    if reset:
+        return f"GitHub API rate limit exceeded (resets at epoch {reset}). {hint}"
+    return f"GitHub API rate limit exceeded. {hint}"
 
 
 def _to_repo(item: dict[str, Any]) -> Repo:
