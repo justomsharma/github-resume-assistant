@@ -11,6 +11,7 @@ empty-input handling so a thin resume yields an empty list, never fabrication.
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import anthropic
@@ -19,8 +20,16 @@ from anthropic.types import MessageParam
 from resume_assistant.core.models import Claim, GapReport, Profile, Suggestion
 
 _MAX_TOKENS = 2048
+# Suggestions carry a much heavier payload than claims (up to _MAX_SUGGESTIONS
+# objects, each with several prose fields), so they need a larger budget or the
+# JSON gets truncated mid-object and fails to parse.
+_SUGGESTION_MAX_TOKENS = 4096
 _MAX_CLAIMS = 12
-_MAX_SUGGESTIONS = 6
+_MAX_SUGGESTIONS = 5
+
+# Retry transient Anthropic failures with exponential backoff (delay = base * 2**n).
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY = 0.5
 
 _SYSTEM_PROMPT = (
     "You extract concrete, verifiable claims from a software engineer's resume. "
@@ -70,6 +79,39 @@ class AnthropicError(RuntimeError):
 
 class AnthropicAuthError(AnthropicError):
     """Raised when the Anthropic API key is missing or rejected."""
+
+
+# Transient failures worth retrying: connection drops, rate limits, and 5xx.
+# AuthenticationError and other 4xx are permanent — never retried.
+_RETRYABLE_ERRORS = (
+    anthropic.APIConnectionError,
+    anthropic.RateLimitError,
+    anthropic.InternalServerError,
+)
+
+
+def _create_with_retries(client: anthropic.Anthropic, **kwargs: Any) -> Any:
+    """Call ``messages.create`` with exponential backoff on transient failures.
+
+    Retries only transient errors (``_RETRYABLE_ERRORS``); a bad API key or other
+    permanent error fails immediately with a typed, friendly exception. Lives in
+    the client layer, where retries belong (docs/ARCHITECTURE.md).
+    """
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return client.messages.create(**kwargs)
+        except anthropic.AuthenticationError as exc:
+            raise AnthropicAuthError("Anthropic rejected the API key.") from exc
+        except _RETRYABLE_ERRORS as exc:
+            if attempt == _MAX_RETRIES - 1:
+                raise AnthropicError(
+                    f"Anthropic request failed after {_MAX_RETRIES} attempts: {exc}"
+                ) from exc
+            time.sleep(_RETRY_BASE_DELAY * (2**attempt))
+        except anthropic.APIError as exc:
+            raise AnthropicError(f"Anthropic request failed: {exc}") from exc
+    # The loop either returns or raises on the final attempt; this is unreachable.
+    raise AnthropicError("Anthropic request failed: retries exhausted.")
 
 
 def build_extraction_messages(resume_text: str) -> list[MessageParam]:
@@ -156,18 +198,13 @@ class AnthropicClient:
         Returns an empty list for an empty/near-empty resume. Raises
         ``AnthropicError`` on API failure or an unparseable response.
         """
-        try:
-            response = self._client.messages.create(
-                model=self._model,
-                max_tokens=_MAX_TOKENS,
-                system=_SYSTEM_PROMPT,
-                messages=build_extraction_messages(resume_text),
-            )
-        except anthropic.AuthenticationError as exc:
-            raise AnthropicAuthError("Anthropic rejected the API key.") from exc
-        except anthropic.APIError as exc:
-            raise AnthropicError(f"Anthropic request failed: {exc}") from exc
-
+        response = _create_with_retries(
+            self._client,
+            model=self._model,
+            max_tokens=_MAX_TOKENS,
+            system=_SYSTEM_PROMPT,
+            messages=build_extraction_messages(resume_text),
+        )
         return _parse_claims(_response_text(response))
 
     def generate_suggestions(
@@ -179,18 +216,13 @@ class AnthropicClient:
         ``AnthropicError`` on API failure or an unparseable response. Ranking is
         left to ``core/suggestions.py`` — this only produces candidates.
         """
-        try:
-            response = self._client.messages.create(
-                model=self._model,
-                max_tokens=_MAX_TOKENS,
-                system=_SUGGESTION_SYSTEM_PROMPT,
-                messages=build_suggestion_messages(gap_report, profile),
-            )
-        except anthropic.AuthenticationError as exc:
-            raise AnthropicAuthError("Anthropic rejected the API key.") from exc
-        except anthropic.APIError as exc:
-            raise AnthropicError(f"Anthropic request failed: {exc}") from exc
-
+        response = _create_with_retries(
+            self._client,
+            model=self._model,
+            max_tokens=_SUGGESTION_MAX_TOKENS,
+            system=_SUGGESTION_SYSTEM_PROMPT,
+            messages=build_suggestion_messages(gap_report, profile),
+        )
         return _parse_suggestions(_response_text(response))
 
 
@@ -230,7 +262,7 @@ def _parse_suggestions(raw: str) -> list[Suggestion]:
         data = json.loads(payload)
     except json.JSONDecodeError as exc:
         raise AnthropicError(
-            "Anthropic returned an unparseable suggestions response."
+            "Anthropic returned an incomplete or non-JSON suggestions response."
         ) from exc
 
     items = data.get("suggestions", []) if isinstance(data, dict) else []

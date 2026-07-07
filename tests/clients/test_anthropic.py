@@ -262,3 +262,99 @@ def test_generate_suggestions_api_error_wrapped(mocker: MockerFixture) -> None:
         AnthropicClient(api_key="k", model="claude-sonnet-5").generate_suggestions(
             _gap_report(empty=False), _profile(empty=False)
         )
+
+
+# --- token budget + retry/backoff (v0.3 truncation bugfix) -------------------
+
+
+def _conn_error() -> anthropic.APIConnectionError:
+    """A transient connection error (retryable)."""
+    return anthropic.APIConnectionError(
+        message="connection dropped",
+        request=httpx.Request("POST", "https://api.anthropic.com"),
+    )
+
+
+def _auth_error() -> anthropic.AuthenticationError:
+    """A 401 auth error (permanent — must not be retried)."""
+    request = httpx.Request("POST", "https://api.anthropic.com")
+    return anthropic.AuthenticationError(
+        "bad key", response=httpx.Response(401, request=request), body=None
+    )
+
+
+def test_suggestions_use_larger_token_budget_than_claims(mocker: MockerFixture) -> None:
+    instance = _patch_sdk(mocker)
+    instance.messages.create.return_value = _text_response('{"suggestions": []}')
+
+    client = AnthropicClient(api_key="k", model="claude-sonnet-5")
+    client.generate_suggestions(_gap_report(empty=False), _profile(empty=False))
+    suggest_tokens = instance.messages.create.call_args.kwargs["max_tokens"]
+
+    instance.messages.create.return_value = _text_response('{"claims": []}')
+    client.extract_claims("resume")
+    claim_tokens = instance.messages.create.call_args.kwargs["max_tokens"]
+
+    # Suggestions get a bigger budget so the richer JSON isn't truncated mid-object.
+    assert suggest_tokens == 4096
+    assert claim_tokens == 2048
+    assert suggest_tokens > claim_tokens
+
+
+def test_truncated_suggestions_response_raises_clear_error(mocker: MockerFixture) -> None:
+    instance = _patch_sdk(mocker)
+    # A response cut off mid-object: valid prefix, no closing braces — what a
+    # too-small max_tokens produced before the fix.
+    instance.messages.create.return_value = _text_response(
+        '{"suggestions": [{"title": "React app", "what_to_build": "A dashb'
+    )
+
+    with pytest.raises(AnthropicError) as excinfo:
+        AnthropicClient(api_key="k", model="claude-sonnet-5").generate_suggestions(
+            _gap_report(empty=False), _profile(empty=False)
+        )
+
+    assert "incomplete or non-JSON" in str(excinfo.value)
+
+
+def test_transient_error_is_retried_then_succeeds(mocker: MockerFixture) -> None:
+    sleep = mocker.patch("resume_assistant.clients.anthropic.time.sleep")
+    instance = _patch_sdk(mocker)
+    instance.messages.create.side_effect = [
+        _conn_error(),
+        _text_response('{"suggestions": []}'),
+    ]
+
+    result = AnthropicClient(api_key="k", model="claude-sonnet-5").generate_suggestions(
+        _gap_report(empty=False), _profile(empty=False)
+    )
+
+    assert result == []
+    assert instance.messages.create.call_count == 2  # first failed, retry succeeded
+    sleep.assert_called_once()  # backed off exactly once before the retry
+
+
+def test_transient_error_retries_exhausted_raises(mocker: MockerFixture) -> None:
+    sleep = mocker.patch("resume_assistant.clients.anthropic.time.sleep")
+    instance = _patch_sdk(mocker)
+    instance.messages.create.side_effect = _conn_error()
+
+    with pytest.raises(AnthropicError):
+        AnthropicClient(api_key="k", model="claude-sonnet-5").extract_claims("resume")
+
+    assert instance.messages.create.call_count == 3  # _MAX_RETRIES attempts
+    assert sleep.call_count == 2  # slept between attempts, not after the last
+
+
+def test_auth_error_is_not_retried(mocker: MockerFixture) -> None:
+    sleep = mocker.patch("resume_assistant.clients.anthropic.time.sleep")
+    instance = _patch_sdk(mocker)
+    instance.messages.create.side_effect = _auth_error()
+
+    with pytest.raises(AnthropicAuthError):
+        AnthropicClient(api_key="k", model="claude-sonnet-5").generate_suggestions(
+            _gap_report(empty=False), _profile(empty=False)
+        )
+
+    assert instance.messages.create.call_count == 1  # permanent error, no retry
+    sleep.assert_not_called()
