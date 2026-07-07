@@ -1,3 +1,4 @@
 # Runtime dependencies. Dev/test extras live in pyproject.toml [dev].
 mcp>=1.2.0
 requests>=2.31
+anthropic>=0.40

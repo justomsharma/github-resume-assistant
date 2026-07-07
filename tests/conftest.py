@@ -6,6 +6,67 @@ from typing import Any
 
 import pytest
 
+from resume_assistant.core.models import Profile, Repo
+
+
+@pytest.fixture
+def sample_resume() -> str:
+    """A short resume with strong (backable) and weak (unbacked) claims."""
+    return (
+        "Built a distributed cache in Go used in production.\n"
+        "Proficient in React for frontend work.\n"
+        "Led a team of five engineers to deliver on time."
+    )
+
+
+@pytest.fixture
+def profile_with_repos() -> Profile:
+    """A profile whose repos back some claims (Go) but not others (React)."""
+    return Profile(
+        login="octocat",
+        name="The Octocat",
+        bio="Building things.",
+        profile_url="https://github.com/octocat",
+        public_repo_count=2,
+        followers=10,
+        repos=[
+            Repo(
+                name="go-cache",
+                description="A distributed cache",
+                url="https://github.com/octocat/go-cache",
+                stars=42,
+                primary_language="Go",
+                created_at="2020-01-01T00:00:00Z",
+                last_pushed_at="2024-06-01T00:00:00Z",
+                is_fork=False,
+            ),
+            Repo(
+                name="forked-thing",
+                description="A React app",
+                url="https://github.com/octocat/forked-thing",
+                stars=0,
+                primary_language="JavaScript",
+                created_at="2021-01-01T00:00:00Z",
+                last_pushed_at="2021-01-02T00:00:00Z",
+                is_fork=True,  # forks don't count as evidence
+            ),
+        ],
+    )
+
+
+@pytest.fixture
+def empty_profile() -> Profile:
+    """Our real target user: a valid profile with no public repos."""
+    return Profile(
+        login="newgrad",
+        name=None,
+        bio=None,
+        profile_url="https://github.com/newgrad",
+        public_repo_count=0,
+        followers=0,
+        repos=[],
+    )
+
 
 @pytest.fixture
 def user_json() -> dict[str, Any]:

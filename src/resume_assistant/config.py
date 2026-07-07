@@ -11,6 +11,7 @@ import os
 from dataclasses import dataclass
 
 _DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5"
+_DEFAULT_CACHE_PATH = os.path.join(os.getcwd(), ".cache", "resume_assistant.db")
 
 
 class ConfigError(RuntimeError):
@@ -22,13 +23,14 @@ class Config:
     """Resolved settings for the server.
 
     ``github_token`` is optional: the GitHub REST API works unauthenticated,
-    just with a lower rate limit. The Anthropic settings are loaded now so v0.2
-    doesn't need to touch config wiring, but they are unused in v0.1.
+    just with a lower rate limit. ``anthropic_api_key`` is required for
+    ``analyze_resume`` (v0.2); ``cache_path`` is where the SQLite cache lives.
     """
 
     github_token: str | None
     anthropic_api_key: str | None
     anthropic_model: str
+    cache_path: str
 
 
 def _load_dotenv() -> None:
@@ -60,4 +62,5 @@ def load_config() -> Config:
         github_token=os.environ.get("GITHUB_TOKEN") or None,
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY") or None,
         anthropic_model=os.environ.get("ANTHROPIC_MODEL") or _DEFAULT_ANTHROPIC_MODEL,
+        cache_path=os.environ.get("CACHE_PATH") or _DEFAULT_CACHE_PATH,
     )
