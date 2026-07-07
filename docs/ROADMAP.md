@@ -82,8 +82,8 @@ To reach real users you need a no-install surface.
 
 - ⬜ Refactor analysis logic into a **plain Python library** (`core/`)
 - ⬜ MCP server becomes a thin adapter over `core/` (for you + portfolio)
-- ⬜ Add a **simple web app** over the same `core/` (for job-seekers, no install)
-- ⬜ Web app: paste resume + enter GitHub username → gap report + build plan
+- ✅ Add a **simple web app** over the same `core/` (for job-seekers, no install)
+- ✅ Web app: paste resume + enter GitHub username → gap report + build plan
 - ⬜ Deploy (Railway / Render free tier)
 
 **Deliverable:** same engine, two front doors — MCP for builders, web for everyone.
