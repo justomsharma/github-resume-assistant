@@ -107,9 +107,7 @@ class CountingSuggester:
         self._suggestions = suggestions
         self.calls = 0
 
-    def generate_suggestions(
-        self, gap_report: GapReport, profile: Profile
-    ) -> list[Suggestion]:
+    def generate_suggestions(self, gap_report: GapReport, profile: Profile) -> list[Suggestion]:
         self.calls += 1
         return self._suggestions
 

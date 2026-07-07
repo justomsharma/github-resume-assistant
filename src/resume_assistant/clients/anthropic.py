@@ -68,7 +68,7 @@ _SUGGESTION_SYSTEM_PROMPT = (
     "Return ONLY a JSON object, no prose, matching exactly this shape:\n"
     '{"suggestions": [{"title": string, "what_to_build": string, '
     '"proves_claim": string, "skills": [string], "size": string, "skip": string}]}\n\n'
-    "If the report contains no claims at all, return {\"suggestions\": []}. Never "
+    'If the report contains no claims at all, return {"suggestions": []}. Never '
     "fabricate a claim or a project to fill the list."
 )
 
@@ -124,8 +124,7 @@ def build_extraction_messages(resume_text: str) -> list[MessageParam]:
         {
             "role": "user",
             "content": (
-                "Extract the claims from this resume.\n\n"
-                f"<resume>\n{resume_text}\n</resume>"
+                f"Extract the claims from this resume.\n\n<resume>\n{resume_text}\n</resume>"
             ),
         }
     ]
@@ -207,9 +206,7 @@ class AnthropicClient:
         )
         return _parse_claims(_response_text(response))
 
-    def generate_suggestions(
-        self, gap_report: GapReport, profile: Profile
-    ) -> list[Suggestion]:
+    def generate_suggestions(self, gap_report: GapReport, profile: Profile) -> list[Suggestion]:
         """Ask Claude for candidate projects grounded in ``gap_report``.
 
         Returns an empty list when the report has no claims to ground on. Raises
@@ -247,9 +244,7 @@ def _parse_claims(raw: str) -> list[Claim]:
         text = str(item.get("text", "")).strip()
         if not text:
             continue
-        skills = tuple(
-            str(s).strip().lower() for s in item.get("skills", []) if str(s).strip()
-        )
+        skills = tuple(str(s).strip().lower() for s in item.get("skills", []) if str(s).strip())
         category = str(item.get("category", "other")).strip() or "other"
         claims.append(Claim(text=text, skills=skills, category=category))
     return claims
@@ -274,9 +269,7 @@ def _parse_suggestions(raw: str) -> list[Suggestion]:
         what_to_build = str(item.get("what_to_build", "")).strip()
         if not title or not what_to_build:
             continue
-        skills = tuple(
-            str(s).strip().lower() for s in item.get("skills", []) if str(s).strip()
-        )
+        skills = tuple(str(s).strip().lower() for s in item.get("skills", []) if str(s).strip())
         suggestions.append(
             Suggestion(
                 title=title,
