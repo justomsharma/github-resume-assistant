@@ -118,16 +118,16 @@ gaps read "not shown yet". Then the v2.0 deploy is unblocked.
 
 ---
 
-## v2.2 — Web upload + premium landing (in progress)
+## v2.2 — Web upload + premium landing
 
 **Goal:** meet job-seekers where they are — let them drop in a resume file
 instead of pasting text, on a landing that looks like a product, not a form.
 
-- 🔨 Web landing redesigned to a premium "analyze your profile" layout
+- ✅ Web landing redesigned to a premium "analyze your profile" layout
   (violet theme + sidebar shell, scoped to the landing so results is untouched)
-- 🔨 Resume **file upload** (PDF / DOCX) parsed to text in the web layer
+- ✅ Resume **file upload** (PDF / DOCX) parsed to text in the web layer
   (`web/resume_upload.py`); `core/` stays pure and still receives text
-- 🔨 10 MB cap + friendly errors for empty / oversized / unsupported / unreadable
+- ✅ 10 MB cap + friendly errors for empty / oversized / unsupported / unreadable
   files; pasted-text path kept as a tolerant fallback
 
 **Deliverable:** upload a PDF/DOCX + GitHub username on a polished page → same
