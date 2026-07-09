@@ -1,0 +1,123 @@
+"use client";
+
+import { useState } from "react";
+import { analyze, AnalysisRequestError } from "@/lib/api";
+import type { AnalysisResponse } from "@/lib/types";
+import Sidebar from "@/components/Sidebar";
+import LandingForm from "@/components/LandingForm";
+import LoadingScreen from "@/components/LoadingScreen";
+import ResultsPanels from "@/components/ResultsPanels";
+import ThemeToggle from "@/components/ThemeToggle";
+
+type Screen = "landing" | "loading" | "results";
+
+export default function Home() {
+  const [screen, setScreen] = useState<Screen>("landing");
+  const [handle, setHandle] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<AnalysisResponse | null>(null);
+
+  async function handleSubmit(file: File, username: string) {
+    setError(null);
+    setHandle(username);
+    setScreen("loading");
+    try {
+      const response = await analyze(file, username);
+      setResult(response);
+      setScreen("results");
+    } catch (err) {
+      const message =
+        err instanceof AnalysisRequestError ? err.message : "Something went wrong. Try again.";
+      setError(message);
+      setScreen("landing");
+    }
+  }
+
+  function reset() {
+    setResult(null);
+    setError(null);
+    setScreen("landing");
+  }
+
+  if (screen === "results" && result) {
+    return (
+      <div className="app">
+        <div className="top">
+          <div className="who">
+            <span>@{result.report.profile_login}</span> ·{" "}
+            <button className="edit" type="button" onClick={reset}>
+              edit inputs
+            </button>
+          </div>
+        </div>
+        <section className="screen active">
+          <ResultsPanels report={result.report} plan={result.plan} />
+          <div className="cta">
+            <button className="btn btn-s" type="button" onClick={reset}>
+              Re-run with an updated resume
+            </button>
+            <span className="foothint">
+              Grounded in @{result.report.profile_login}&rsquo;s real public repos.
+            </span>
+          </div>
+        </section>
+        <ThemeToggle />
+      </div>
+    );
+  }
+
+  return (
+    <div className="v-ai">
+      <div className="app">
+        <div className="shell">
+          <Sidebar />
+          <main className="main">
+            {screen === "loading" ? (
+              <section className="screen active">
+                <LoadingScreen handle={handle ? `@${handle}` : "your"} />
+              </section>
+            ) : (
+              <section className="screen active">
+                <div className="hgroup">
+                  <span className="pill">Grounded in your real GitHub ⚡</span>
+                  <h1>
+                    Let&rsquo;s make your resume <span className="grad">credible</span>
+                  </h1>
+                  <p className="sub">
+                    Upload your resume and share your GitHub username to get a grounded gap
+                    report and a personalized 30-day build plan.
+                  </p>
+                </div>
+                <LandingForm error={error} submitting={false} onSubmit={handleSubmit} />
+                <div className="features">
+                  <div className="feat">
+                    <span className="feat-ic">🛡</span>
+                    <div>
+                      <div className="feat-t">Secure &amp; Private</div>
+                      <div className="feat-d">Public repos only; nothing is stored</div>
+                    </div>
+                  </div>
+                  <div className="feat">
+                    <span className="feat-ic">⚡</span>
+                    <div>
+                      <div className="feat-t">Grounded Verdicts</div>
+                      <div className="feat-d">Checked against your real repo code</div>
+                    </div>
+                  </div>
+                  <div className="feat">
+                    <span className="feat-ic">📈</span>
+                    <div>
+                      <div className="feat-t">Actionable Plan</div>
+                      <div className="feat-d">A ranked 30-day plan to close gaps</div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
+          </main>
+        </div>
+      </div>
+      <ThemeToggle />
+    </div>
+  );
+}

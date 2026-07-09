@@ -1,0 +1,21 @@
+# Render Blueprint for the Flask JSON API (v2.3). Free web service tier.
+# Deploy: connect this repo in the Render dashboard and it reads this file
+# automatically ("New +" -> "Blueprint"). Secrets (ANTHROPIC_API_KEY,
+# GITHUB_TOKEN) are NOT listed here — set them in the Render dashboard's
+# environment tab after the first deploy; never commit them.
+services:
+  - type: web
+    name: resume-assistant-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -e ".[deploy]"
+    startCommand: gunicorn "resume_assistant.web.app:create_app()"
+    envVars:
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-5
+      - key: FRONTEND_ORIGIN
+        sync: false # set to the deployed Vercel URL after the frontend is live
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false

@@ -135,6 +135,28 @@ grounded gap report and 30-day plan.
 
 ---
 
+## v2.3 — Next.js frontend + JSON API split
+
+**Goal:** give the UI room to grow. The v2.2 Jinja-rendered pages were fine for a
+static two-page flow, but hand-rolled JS gets painful as interactivity grows —
+move to a typed frontend without touching the proven `core/` engine.
+
+- ✅ `web/app.py` becomes a pure JSON API (`POST /api/analyze`); the Jinja
+  templates/static assets are retired, not kept in parallel
+- ✅ `frontend/` — a new Next.js + TypeScript app (App Router) reproducing the
+  v2.2 landing + v2.1 results UI as React components, calling the API directly
+  from the browser (`NEXT_PUBLIC_API_URL`, no Next.js server proxy)
+- ✅ CORS scoped to the frontend's origin (`FRONTEND_ORIGIN` config, never a
+  wildcard — the API accepts file uploads)
+- ✅ `core/`, `clients/`, `cache/` untouched — this is an interface-layer swap
+- ✅ Deploy configs for two free-tier services: `render.yaml` (Flask API on
+  Render) + Vercel (Next.js frontend, root directory `frontend/`)
+
+**Deliverable:** the same grounded gap report + 30-day plan, served by a
+TypeScript frontend and a JSON API, deployable as two free-tier services.
+
+---
+
 ## v3.0+ — Ideas parking lot (not committed)
 
 Only promote these to a real version if a user actually asks for them:

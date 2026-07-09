@@ -142,6 +142,7 @@ def _patch_config(mocker: MockerFixture, tmp_path: Path, api_key: str | None) ->
             anthropic_api_key=api_key,
             anthropic_model="claude-sonnet-5",
             cache_path=str(tmp_path / "cache.db"),
+            frontend_origin="http://127.0.0.1:3000",
         ),
     )
 

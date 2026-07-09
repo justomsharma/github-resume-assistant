@@ -9,11 +9,17 @@ Even though v1 only exposes an MCP server, we write the analysis logic so it doe
 **not** import anything MCP-specific. This costs almost nothing now and makes the
 v2 web app a wrapper instead of a rewrite (see ROADMAP.md v2.0).
 
-- **`core/`** = pure logic. Knows nothing about MCP. Testable without a server.
+- **`core/`** = pure logic. Knows nothing about MCP **or the web**. Testable
+  without a server, a browser, or Flask.
 - **`server/`** = the MCP adapter. Thin. Translates tool calls into `core/` calls.
 - **`clients/`** = talking to the outside world (GitHub API, Anthropic API).
+- **`web/`** = the Flask JSON API (v2.3). Thin, like `server/` — validates input,
+  calls `service.py` (which calls `core/`), serializes to JSON. Never imports MCP;
+  `core/` never imports Flask.
+- **`frontend/`** = the Next.js + TypeScript UI (v2.3), a separate app that calls
+  `web/`'s JSON API over HTTP. Deployed independently (see README.md).
 
-## Folder layout (v1)
+## Folder layout (v2.3)
 
 ```
 github-resume-assistant/
@@ -35,7 +41,15 @@ github-resume-assistant/
 │       ├── cache/
 │       │   ├── __init__.py
 │       │   └── store.py          # SQLite cache (added in v0.2)
+│       ├── web/                  # Flask JSON API (v2.0 web, JSON-ified in v2.3)
+│       │   ├── __init__.py
+│       │   ├── app.py            # routes: validate → service.py → jsonify
+│       │   ├── service.py        # orchestrates fetch -> core/ for the web adapter
+│       │   ├── serialize.py      # core/ dataclasses -> JSON-safe dicts
+│       │   └── resume_upload.py  # PDF/DOCX -> text (web-layer input adapter)
 │       └── config.py             # env var loading, settings
+├── frontend/                     # Next.js + TypeScript UI (v2.3), deployed
+│   └── src/                      # separately; calls web/'s JSON API over HTTP
 ├── tests/                        # mirrors src/ structure (see TESTING.md)
 ├── docs/
 ├── .claude/skills/
@@ -43,6 +57,7 @@ github-resume-assistant/
 ├── requirements.txt
 ├── .env.example
 ├── .gitignore
+├── render.yaml                   # Render Blueprint for the web/ API (v2.3)
 ├── Dockerfile                    # added in v1.0
 └── README.md
 ```
