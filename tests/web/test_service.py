@@ -19,6 +19,7 @@ def config() -> Config:
         anthropic_api_key="test-key",
         anthropic_model="claude-sonnet-5",
         cache_path=":memory:",
+        frontend_origin="http://127.0.0.1:3000",
     )
 
 

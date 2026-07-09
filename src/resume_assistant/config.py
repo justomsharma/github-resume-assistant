@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 _DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5"
 _DEFAULT_CACHE_PATH = os.path.join(os.getcwd(), ".cache", "resume_assistant.db")
+_DEFAULT_FRONTEND_ORIGIN = "http://127.0.0.1:3000"
 
 
 class ConfigError(RuntimeError):
@@ -25,12 +26,15 @@ class Config:
     ``github_token`` is optional: the GitHub REST API works unauthenticated,
     just with a lower rate limit. ``anthropic_api_key`` is required for
     ``analyze_resume`` (v0.2); ``cache_path`` is where the SQLite cache lives.
+    ``frontend_origin`` is the Next.js app's origin, allowed via CORS on the
+    JSON API (v2.3) — never a wildcard, since the API accepts file uploads.
     """
 
     github_token: str | None
     anthropic_api_key: str | None
     anthropic_model: str
     cache_path: str
+    frontend_origin: str
 
 
 def _load_dotenv() -> None:
@@ -63,4 +67,5 @@ def load_config() -> Config:
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY") or None,
         anthropic_model=os.environ.get("ANTHROPIC_MODEL") or _DEFAULT_ANTHROPIC_MODEL,
         cache_path=os.environ.get("CACHE_PATH") or _DEFAULT_CACHE_PATH,
+        frontend_origin=os.environ.get("FRONTEND_ORIGIN") or _DEFAULT_FRONTEND_ORIGIN,
     )

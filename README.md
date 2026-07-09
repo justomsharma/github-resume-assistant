@@ -72,28 +72,38 @@ in SQLite so re-running the same gap report doesn't re-hit the Anthropic API.
 In Claude Desktop, ask: **"what should I build to make my resume credible?"** and
 paste your resume + username.
 
-## The web app (v2.0 — no install)
+## The web app (v2.0–v2.3 — no install)
 
 The same engine, a second front door. Job-seekers don't install MCP servers, so
-`resume_assistant/web/` is a thin Flask adapter over the identical `core/` logic
-(`build_gap_report` + `build_project_plan`): paste your resume, type a GitHub
-username, and get the gap report + ranked 30-day plan as a web page. The
+there's a **Next.js + TypeScript frontend** (`frontend/`) calling a **Flask JSON
+API** (`resume_assistant/web/`) that's a thin adapter over the identical `core/`
+logic (`build_gap_report` + `build_project_plan`) — upload your resume (PDF/DOCX),
+type a GitHub username, and get the gap report + ranked 30-day plan. The
 empty-GitHub case is the main case — it renders a build plan, not "nothing found".
 
-Run it locally:
+As of v2.3 the UI and API are two separately-runnable, separately-deployable
+processes; `core/` never imports Flask or knows the frontend exists.
+
+Run both locally:
 
 ```bash
-# after `pip install -e ".[dev]"` and setting ANTHROPIC_API_KEY (see below)
-resume-assistant-web
-# then open http://127.0.0.1:5000
-
-# if `resume-assistant-web` isn't found (its Scripts dir isn't on PATH,
-# common on Windows), run it as a module instead:
+# Terminal 1 — the JSON API (after `pip install -e ".[dev]"` and setting
+# ANTHROPIC_API_KEY, see below)
 python -m resume_assistant.web.app
+# serves http://127.0.0.1:5000/api/analyze
+
+# Terminal 2 — the frontend
+cd frontend
+npm install
+cp .env.local.example .env.local   # NEXT_PUBLIC_API_URL defaults to the API above
+npm run dev
+# open http://127.0.0.1:3000
 ```
 
 `ANTHROPIC_API_KEY` is required; `GITHUB_TOKEN` is optional (a higher GitHub rate
-limit). Each claim is graded against your real repo code — parsed dependency
+limit); `FRONTEND_ORIGIN` (defaults to `http://127.0.0.1:3000`) scopes the API's
+CORS to the frontend's origin — set it to your deployed frontend's URL in
+production. Each claim is graded against your real repo code — parsed dependency
 manifests, the recursive file tree, language breakdown, and README — and earns one
 of three honest verdicts: **backed** (public code proves it, citing the specific
 files), **not shown yet** (a gap to close), or **not verifiable from public code**
@@ -105,13 +115,28 @@ structurally can't prove).
 > can exhaust the rate limit — you'll get a friendly "set a `GITHUB_TOKEN`" message
 > rather than a crash. Setting a token raises the limit dramatically.
 
+### Deploying (free tiers)
+
+Two services, deployed separately:
+
+- **API** ([Render](https://render.com), free web service) — this repo includes
+  `render.yaml`; connect the repo in the Render dashboard as a Blueprint, then set
+  `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, and `FRONTEND_ORIGIN` (your Vercel URL) in
+  its environment tab. Runs via `gunicorn`.
+- **Frontend** ([Vercel](https://vercel.com), free tier) — import this repo, set
+  the project's **Root Directory** to `frontend/`, and set `NEXT_PUBLIC_API_URL`
+  to your Render URL. Vercel auto-detects Next.js; no extra config needed.
+
 ## Tech stack
 
-- Python 3.11+ with the official `mcp` library (and Flask for the v2.0 web app)
+- **Backend:** Python 3.11+ with the official `mcp` library; Flask (`flask-cors`)
+  for the v2.3 JSON API
+- **Frontend:** Next.js + TypeScript (App Router), plain CSS — no UI framework
 - GitHub REST API (`requests`)
 - Anthropic API (latest Claude models — `claude-sonnet-5` / `claude-opus-4-8`)
 - SQLite for caching (from v0.2)
-- pytest for testing, ruff + mypy for quality
+- pytest for backend testing, ruff + mypy for backend quality; ESLint + `tsc` for
+  the frontend
 
 ## Getting started (dev)
 
