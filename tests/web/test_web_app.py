@@ -162,6 +162,26 @@ def test_bad_file_returns_friendly_400(mocker: MockerFixture, client: FlaskClien
     run.assert_not_called()
 
 
+def test_oversized_upload_returns_friendly_413(mocker: MockerFixture, client: FlaskClient) -> None:
+    """A file over the WSGI-layer cap gets the 413 error handler's JSON, not Flask's HTML page."""
+    from resume_assistant.web.resume_upload import MAX_UPLOAD_BYTES
+
+    run = mocker.patch.object(webapp, "run_analysis")
+    oversized = b"x" * (MAX_UPLOAD_BYTES + 1)
+
+    resp = client.post(
+        "/api/analyze",
+        data={"username": "octocat", "resume_file": (io.BytesIO(oversized), "resume.pdf")},
+        content_type="multipart/form-data",
+    )
+
+    assert resp.status_code == 413
+    assert resp.get_json() == {
+        "error": "That file is larger than the 10 MB limit. Upload a smaller file."
+    }
+    run.assert_not_called()
+
+
 def test_blank_resume_returns_validation_error(mocker: MockerFixture, client: FlaskClient) -> None:
     run = mocker.patch.object(webapp, "run_analysis")
 
