@@ -42,6 +42,48 @@
     });
   }
 
+  // --- Landing: drag & drop + file picker for the resume upload -------------
+  // Progressive enhancement: the <label for> + <input type=file required>
+  // already work with no JS (click to pick, native validation). This only adds
+  // drag-and-drop and a filename preview on top.
+  function wireUpload() {
+    var drop = document.getElementById("drop");
+    var input = document.getElementById("resume_file");
+    var title = document.getElementById("dropTitle");
+    if (!drop || !input || !title) return;
+
+    function showFile() {
+      if (input.files && input.files.length) {
+        title.textContent = input.files[0].name;
+        drop.classList.add("hasfile");
+      } else {
+        title.textContent = "Drag & drop your file here";
+        drop.classList.remove("hasfile");
+      }
+    }
+
+    input.addEventListener("change", showFile);
+
+    ["dragenter", "dragover"].forEach(function (evt) {
+      drop.addEventListener(evt, function (e) {
+        e.preventDefault();
+        drop.classList.add("dragover");
+      });
+    });
+    ["dragleave", "dragend", "drop"].forEach(function (evt) {
+      drop.addEventListener(evt, function () {
+        drop.classList.remove("dragover");
+      });
+    });
+    drop.addEventListener("drop", function (e) {
+      e.preventDefault();
+      if (e.dataTransfer && e.dataTransfer.files.length) {
+        input.files = e.dataTransfer.files;
+        showFile();
+      }
+    });
+  }
+
   function playLoading(handle) {
     var box = document.getElementById("loadSteps");
     if (!box) return;
@@ -113,6 +155,7 @@
     var toggle = document.getElementById("themeToggle");
     if (toggle) toggle.addEventListener("click", toggleTheme);
     wireForm();
+    wireUpload();
     buildGraph();
   });
 })();

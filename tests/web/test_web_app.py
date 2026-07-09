@@ -3,6 +3,8 @@ is mocked — routes are tested for the three UI states and their error paths.""
 
 from __future__ import annotations
 
+import io
+
 import pytest
 from flask.testing import FlaskClient
 from pytest_mock import MockerFixture
@@ -56,9 +58,54 @@ def test_landing_renders_form(client: FlaskClient) -> None:
     resp = client.get("/")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert "Make your resume" in body
-    assert 'name="resume_text"' in body
+    assert "make your resume" in body.lower()
+    assert 'name="resume_file"' in body  # upload-only landing
+    assert 'type="file"' in body
     assert 'name="username"' in body
+
+
+def test_file_upload_happy_path(
+    mocker: MockerFixture, client: FlaskClient, profile_with_repos: Profile
+) -> None:
+    """An uploaded file is parsed to text, then analyzed like any other run."""
+    extract = mocker.patch.object(
+        webapp, "extract_resume_text", return_value="Built a distributed cache in Go"
+    )
+    outcome = _result(profile_with_repos, False, suggestions=())
+    run = mocker.patch.object(webapp, "run_analysis", return_value=outcome)
+
+    resp = client.post(
+        "/analyze",
+        data={"username": "octocat", "resume_file": (io.BytesIO(b"%PDF-fake"), "resume.pdf")},
+        content_type="multipart/form-data",
+    )
+
+    assert resp.status_code == 200
+    extract.assert_called_once()
+    # The engine receives the extracted text, never the raw file bytes.
+    assert run.call_args.args[0] == "Built a distributed cache in Go"
+
+
+def test_bad_file_returns_friendly_400(mocker: MockerFixture, client: FlaskClient) -> None:
+    """A file that can't be parsed re-renders the form with the parser's message."""
+    from resume_assistant.web.resume_upload import ResumeUploadError
+
+    mocker.patch.object(
+        webapp,
+        "extract_resume_text",
+        side_effect=ResumeUploadError("That PDF file looks corrupted."),
+    )
+    run = mocker.patch.object(webapp, "run_analysis")
+
+    resp = client.post(
+        "/analyze",
+        data={"username": "octocat", "resume_file": (io.BytesIO(b"garbage"), "resume.pdf")},
+        content_type="multipart/form-data",
+    )
+
+    assert resp.status_code == 400
+    assert "That PDF file looks corrupted." in resp.get_data(as_text=True)
+    run.assert_not_called()
 
 
 def test_has_github_results_show_meter_and_plan(
@@ -128,7 +175,7 @@ def test_blank_resume_returns_validation_error(mocker: MockerFixture, client: Fl
     resp = client.post("/analyze", data={"resume_text": "  ", "username": "octocat"})
 
     assert resp.status_code == 400
-    assert "paste your resume" in resp.get_data(as_text=True)
+    assert "upload your resume" in resp.get_data(as_text=True)
     run.assert_not_called()  # never runs the analysis on invalid input
 
 
@@ -170,5 +217,5 @@ def test_service_errors_render_friendly_message(
     assert resp.status_code == status
     body = resp.get_data(as_text=True)
     assert needle in body
-    # errors re-render the form so the user can fix and retry, with inputs preserved
-    assert 'name="resume_text"' in body
+    # errors re-render the form so the user can fix and retry
+    assert 'name="resume_file"' in body
