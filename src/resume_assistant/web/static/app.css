@@ -88,8 +88,28 @@ textarea.field{ min-height:130px; resize:vertical; line-height:1.5; }
 .ls.wait .lb{ color:var(--muted); }
 .ls .meta{ margin-left:auto; font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
 
-/* ---------- RESULTS: shared ---------- */
-.hero{ background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:26px; margin-top:6px; }
+/* ---------- RESULTS: 3-panel overview ---------- */
+/* Row on desktop, stacked on mobile. Each panel is a native <details>: the
+   <summary> is the click/keyboard target, and it expands in place. Score + Plan
+   ship open; Gaps ships collapsed (see the <details open> attrs in the template). */
+.panels{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; align-items:start; margin-top:6px; }
+.panel{ background:var(--panel); border:1px solid var(--line); border-radius:18px; overflow:hidden; }
+.panel[open]{ border-color:var(--hair); }
+.phead{ display:flex; align-items:center; gap:11px; padding:18px 20px; cursor:pointer; list-style:none; user-select:none; }
+.phead::-webkit-details-marker{ display:none; }
+.phead:focus-visible{ outline:3px solid var(--accent); outline-offset:-3px; border-radius:18px; }
+.phead .pn{ font-family:var(--serif); color:var(--rx); font-size:22px; line-height:1; flex:0 0 auto; }
+.panel-score[data-empty="true"] .pn{ color:var(--accent); }
+.phead .pt{ display:flex; flex-direction:column; min-width:0; flex:1; }
+.phead .plabel{ font-size:17px; font-weight:800; letter-spacing:-.01em; }
+.phead .pgist{ font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
+.phead .chev{ flex:0 0 auto; width:9px; height:9px; border-right:2px solid var(--muted); border-bottom:2px solid var(--muted); transform:rotate(45deg); transition:transform .2s ease; margin-right:2px; }
+.panel[open] .phead .chev{ transform:rotate(-135deg); }
+@media (prefers-reduced-motion:reduce){ .phead .chev{ transition:none; } }
+.pbody{ padding:0 20px 22px; }
+/* Desktop-only hover affordance; never the only way to open (click still works). */
+@media (hover:hover){ .phead:hover .plabel{ color:var(--accent-ink); } }
+
 .hero .kicker[data-role]{ display:block; }
 .hero[data-empty="true"] .kicker{ color:var(--accent); }
 .hero[data-empty="false"] .kicker{ color:var(--rx); }
@@ -114,11 +134,7 @@ textarea.field{ min-height:130px; resize:vertical; line-height:1.5; }
 .glegend .scale{ display:flex; align-items:center; gap:4px; }
 .glegend .scale i{ width:11px; height:11px; border-radius:2.5px; display:block; }
 
-.rxhead{ display:flex; align-items:baseline; gap:10px; margin:34px 0 4px; }
-.rxhead .n{ font-family:var(--serif); color:var(--rx); font-size:22px; line-height:1; }
-.rxhead h2{ font-size:19px; font-weight:800; letter-spacing:-.01em; margin:0; }
-.rxhead .meta{ margin-left:auto; font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
-.subtle{ font-size:13.5px; color:var(--muted); margin:2px 0 14px; }
+.subtle{ font-size:13.5px; color:var(--muted); margin:0 0 14px; }
 
 .dx{ background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
 .dx .r{ display:flex; gap:12px; align-items:flex-start; padding:13px 16px; border-bottom:1px solid var(--line); }
@@ -153,6 +169,10 @@ textarea.field{ min-height:130px; resize:vertical; line-height:1.5; }
 /* theme toggle */
 .themetoggle{ position:fixed; bottom:16px; right:16px; z-index:10; background:var(--panel); border:1px solid var(--hair); color:var(--ink); border-radius:20px; padding:8px 14px; font:inherit; font-size:12px; font-weight:700; cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.1); }
 
+/* Stack the three panels before they get too cramped to read side by side. */
+@media (max-width:720px){
+  .panels{ grid-template-columns:1fr; }
+}
 @media (max-width:560px){
   .how{ grid-template-columns:1fr; }
   .graph{ grid-template-columns:repeat(20,1fr); }

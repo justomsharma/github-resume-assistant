@@ -93,6 +93,38 @@ def test_has_github_results_show_meter_and_plan(
     assert "react-dashboard" in body
     assert "go-cache/src/cache.go" in body  # backed claim cites the specific file
     assert "graded against your real repo code" in body  # honest, grounded labeling
+    _assert_three_panels(body)
+
+
+def _assert_three_panels(body: str) -> None:
+    """The results page is three <details> panels, all present at once.
+
+    Score + Prescription ship open; Diagnosis ships collapsed. We check the
+    element ids and their open attribute so the default-open contract is pinned.
+    """
+    assert 'id="p-score"' in body and 'id="p-gaps"' in body and 'id="p-plan"' in body
+    # Score + Plan carry `open`; Gaps does not.
+    assert 'data-empty="true" open' in body or 'data-empty="false" open' in body
+    assert 'id="p-plan" open' in body
+    assert 'id="p-gaps" open' not in body
+    # Panel summaries carry their labels.
+    assert "Score" in body and "Diagnosis" in body and "Prescription" in body
+
+
+def test_total_zero_shows_empty_states_in_panels(
+    mocker: MockerFixture, client: FlaskClient, profile_with_repos: Profile
+) -> None:
+    """No verifiable claims: panels still render, each with its own empty state."""
+    outcome = _result(profile_with_repos, False)  # no claims, no suggestions
+    mocker.patch.object(webapp, "run_analysis", return_value=outcome)
+
+    resp = client.post("/analyze", data={"resume_text": "x", "username": "octocat"})
+
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    _assert_three_panels(body)
+    assert "No concrete, verifiable claims were found in the resume text." in body
+    assert "add specifics to unlock" in body  # Plan panel gist, empty state
 
 
 def test_empty_github_is_the_main_case(
@@ -120,6 +152,8 @@ def test_empty_github_is_the_main_case(
     assert "clean slate" in body
     assert "go-lru-cache" in body  # still prescribes what to build
     assert "not shown yet" in body
+    _assert_three_panels(body)
+    assert "Clean slate" in body  # Score panel gist, empty-GitHub framing
 
 
 def test_blank_resume_returns_validation_error(mocker: MockerFixture, client: FlaskClient) -> None:

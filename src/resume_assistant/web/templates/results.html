@@ -18,83 +18,124 @@
 
 <!-- ============ RESULTS ============ -->
 <section class="screen active" id="s-results">
-  <section class="hero" id="hero" data-empty="{{ 'true' if empty else 'false' }}">
-    {% if empty %}
-      <span class="kicker" data-role>Your next 30 days</span>
-      <h1>Empty GitHub? <em>Good — a clean slate.</em></h1>
-      <p class="hlede">Nothing public backs your resume yet. That's the common case when your real work lives in private repos. Here's the plan that fills this in.</p>
-    {% else %}
-      <span class="kicker" data-role>You've got public work — let's aim it</span>
-      <h1>{{ backed }} of {{ total }} claims are already <em>backed</em> by your GitHub.</h1>
-      <p class="hlede">Your public repos prove {{ 'most' if backed >= gaps else 'some' }} of your resume. {{ gaps }} claim{{ 's' if gaps != 1 else '' }} still {{ 'have' if gaps != 1 else 'has' }} no public evidence — closing those is where the leverage is.</p>
-    {% endif %}
+  <div class="panels">
 
-    <div class="summary" id="h-summary"{% if empty or total == 0 %} hidden{% endif %}>
-      <div class="meter" id="h-meter" style="--pct: {{ pct }}"><span class="val"><b>{{ pct }}%</b><span>backed</span></span></div>
-      <div class="callout">
-        <div class="big">{{ backed }} of {{ total }} claims backed by public code.</div>
-        <div class="small">Each verdict is graded against your real repo code — dependencies, file tree, and README — and backed claims cite the specific files that prove them.</div>
+    <!-- ---- Score panel ---- -->
+    <details class="panel panel-score" id="p-score" data-empty="{{ 'true' if empty else 'false' }}" open>
+      <summary class="phead">
+        <span class="pn">&#8478;</span>
+        <span class="pt">
+          <span class="plabel">Score</span>
+          <span class="pgist">{% if empty %}Clean slate{% else %}{{ backed }} of {{ total }} backed{% endif %}</span>
+        </span>
+        <span class="chev" aria-hidden="true"></span>
+      </summary>
+      <div class="pbody">
+        <section class="hero" id="hero" data-empty="{{ 'true' if empty else 'false' }}">
+          {% if empty %}
+            <span class="kicker" data-role>Your next 30 days</span>
+            <h1>Empty GitHub? <em>Good — a clean slate.</em></h1>
+            <p class="hlede">Nothing public backs your resume yet. That's the common case when your real work lives in private repos. Here's the plan that fills this in.</p>
+          {% else %}
+            <span class="kicker" data-role>You've got public work — let's aim it</span>
+            <h1>{{ backed }} of {{ total }} claims are already <em>backed</em> by your GitHub.</h1>
+            <p class="hlede">Your public repos prove {{ 'most' if backed >= gaps else 'some' }} of your resume. {{ gaps }} claim{{ 's' if gaps != 1 else '' }} still {{ 'have' if gaps != 1 else 'has' }} no public evidence — closing those is where the leverage is.</p>
+          {% endif %}
+
+          <div class="summary" id="h-summary"{% if empty or total == 0 %} hidden{% endif %}>
+            <div class="meter" id="h-meter" style="--pct: {{ pct }}"><span class="val"><b>{{ pct }}%</b><span>backed</span></span></div>
+            <div class="callout">
+              <div class="big">{{ backed }} of {{ total }} claims backed by public code.</div>
+              <div class="small">Each verdict is graded against your real repo code — dependencies, file tree, and README — and backed claims cite the specific files that prove them.</div>
+            </div>
+          </div>
+
+          <div class="graph" id="h-graph" data-graph-mode="{{ 'tail' if empty else 'full' }}" aria-hidden="true"></div>
+          <div class="glegend">
+            <span>{% if empty %}0 public contributions today → a plan to change that this month{% else %}Active public history — this is your credibility engine{% endif %}</span>
+            <span class="scale">less <i style="background:var(--g0)"></i><i style="background:var(--g1)"></i><i style="background:var(--g2)"></i><i style="background:var(--g3)"></i><i style="background:var(--g4)"></i> more</span>
+          </div>
+        </section>
       </div>
-    </div>
+    </details>
 
-    <div class="graph" id="h-graph" data-graph-mode="{{ 'tail' if empty else 'full' }}" aria-hidden="true"></div>
-    <div class="glegend">
-      <span>{% if empty %}0 public contributions today → a plan to change that this month{% else %}Active public history — this is your credibility engine{% endif %}</span>
-      <span class="scale">less <i style="background:var(--g0)"></i><i style="background:var(--g1)"></i><i style="background:var(--g2)"></i><i style="background:var(--g3)"></i><i style="background:var(--g4)"></i> more</span>
-    </div>
-  </section>
+    <!-- ---- Gaps panel (Diagnosis) ---- -->
+    <details class="panel panel-gaps" id="p-gaps">
+      <summary class="phead">
+        <span class="pn">&#8478;</span>
+        <span class="pt">
+          <span class="plabel">Diagnosis</span>
+          <span class="pgist">{{ backed }} backed · {{ gaps }} not shown{% if nverif %} · {{ nverif }} not verifiable{% endif %}</span>
+        </span>
+        <span class="chev" aria-hidden="true"></span>
+      </summary>
+      <div class="pbody">
+        <p class="subtle">What your public code does and doesn't yet prove. Each claim is graded against your real repos and backed claims cite specific files — so "not shown yet" is a gap to close, not a mark against you, and "not verifiable from public code" just means public code can't prove that kind of claim.</p>
 
-  <div class="rxhead"><span class="n">&#8478;</span><h2>Diagnosis</h2><span class="meta">{{ total }} claim{{ 's' if total != 1 else '' }} · {{ backed }} backed · {{ gaps }} not shown yet{% if nverif %} · {{ nverif }} not verifiable{% endif %}</span></div>
-  <p class="subtle">What your public code does and doesn't yet prove. Each claim is graded against your real repos and backed claims cite specific files — so "not shown yet" is a gap to close, not a mark against you, and "not verifiable from public code" just means public code can't prove that kind of claim.</p>
-
-  {% if total == 0 %}
-  <div class="dx">
-    <div class="r"><span class="claim">No concrete, verifiable claims were found in the resume text.<span class="why">Add specific projects, technologies, and outcomes, then run this again.</span></span></div>
-  </div>
-  {% else %}
-  <div class="dx" id="dx-list">
-    {% for evidence in report.backed %}
-    <div class="r">
-      <span class="st st-ok">backed</span>
-      <span class="claim">{{ evidence.claim.text }}<span class="why">{{ evidence.rationale }}{% if evidence.cited_files %} <span class="cites">Cites: {{ evidence.cited_files|join(', ') }}</span>{% endif %}</span></span>
-    </div>
-    {% endfor %}
-    {% for evidence in report.not_shown %}
-    <div class="r">
-      <span class="st st-gap">not shown yet</span>
-      <span class="claim">{{ evidence.claim.text }}<span class="why">{{ evidence.rationale }}</span></span>
-    </div>
-    {% endfor %}
-    {% for evidence in report.not_verifiable %}
-    <div class="r">
-      <span class="st st-na">not verifiable from public code</span>
-      <span class="claim">{{ evidence.claim.text }}<span class="why">{{ evidence.rationale }}</span></span>
-    </div>
-    {% endfor %}
-  </div>
-  {% endif %}
-
-  <div class="rxhead"><span class="n">&#8478;</span><h2>Prescription</h2><span class="meta">gaps first · quick wins early</span></div>
-  {% if plan.suggestions %}
-  <p class="subtle">{% if empty %}Projects ranked so each turns one resume claim into public proof.{% else %}Fewer, sharper projects — you need the missing pieces, not volume.{% endif %}</p>
-  <div class="track" id="rx-track">
-    {% for s in plan.suggestions %}
-    <div class="step">
-      <div class="rail"><div class="num">{{ loop.index }}</div><div class="line"></div></div>
-      <div class="card2">
-        <div class="t"><span class="title">{{ s.title }}</span><span class="size">{{ s.size }}</span></div>
-        <p class="build">{{ s.what_to_build }}</p>
-        <div class="foot">
-          <span>Proves: <b>{{ s.proves_claim or 'a claimed skill' }}</b></span>
-          <span class="skip">Skip: <b>{{ s.skip or 'anything not core to the demo' }}</b></span>
+        {% if total == 0 %}
+        <div class="dx">
+          <div class="r"><span class="claim">No concrete, verifiable claims were found in the resume text.<span class="why">Add specific projects, technologies, and outcomes, then run this again.</span></span></div>
         </div>
+        {% else %}
+        <div class="dx" id="dx-list">
+          {% for evidence in report.backed %}
+          <div class="r">
+            <span class="st st-ok">backed</span>
+            <span class="claim">{{ evidence.claim.text }}<span class="why">{{ evidence.rationale }}{% if evidence.cited_files %} <span class="cites">Cites: {{ evidence.cited_files|join(', ') }}</span>{% endif %}</span></span>
+          </div>
+          {% endfor %}
+          {% for evidence in report.not_shown %}
+          <div class="r">
+            <span class="st st-gap">not shown yet</span>
+            <span class="claim">{{ evidence.claim.text }}<span class="why">{{ evidence.rationale }}</span></span>
+          </div>
+          {% endfor %}
+          {% for evidence in report.not_verifiable %}
+          <div class="r">
+            <span class="st st-na">not verifiable from public code</span>
+            <span class="claim">{{ evidence.claim.text }}<span class="why">{{ evidence.rationale }}</span></span>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
       </div>
-    </div>
-    {% endfor %}
+    </details>
+
+    <!-- ---- Plan panel (Prescription) ---- -->
+    <details class="panel panel-plan" id="p-plan" open>
+      <summary class="phead">
+        <span class="pn">&#8478;</span>
+        <span class="pt">
+          <span class="plabel">Prescription</span>
+          <span class="pgist">{% if plan.suggestions %}{{ plan.suggestions|length }} project{{ 's' if plan.suggestions|length != 1 else '' }} · gaps first{% else %}add specifics to unlock{% endif %}</span>
+        </span>
+        <span class="chev" aria-hidden="true"></span>
+      </summary>
+      <div class="pbody">
+        {% if plan.suggestions %}
+        <p class="subtle">{% if empty %}Projects ranked so each turns one resume claim into public proof.{% else %}Fewer, sharper projects — you need the missing pieces, not volume.{% endif %}</p>
+        <div class="track" id="rx-track">
+          {% for s in plan.suggestions %}
+          <div class="step">
+            <div class="rail"><div class="num">{{ loop.index }}</div><div class="line"></div></div>
+            <div class="card2">
+              <div class="t"><span class="title">{{ s.title }}</span><span class="size">{{ s.size }}</span></div>
+              <p class="build">{{ s.what_to_build }}</p>
+              <div class="foot">
+                <span>Proves: <b>{{ s.proves_claim or 'a claimed skill' }}</b></span>
+                <span class="skip">Skip: <b>{{ s.skip or 'anything not core to the demo' }}</b></span>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="subtle">No concrete, verifiable claims were found to ground suggestions on. Add specific projects, technologies, and outcomes to your resume, then run this again.</p>
+        {% endif %}
+      </div>
+    </details>
+
   </div>
-  {% else %}
-  <p class="subtle">No concrete, verifiable claims were found to ground suggestions on. Add specific projects, technologies, and outcomes to your resume, then run this again.</p>
-  {% endif %}
 
   <div class="cta">
     <a class="btn btn-s" href="{{ url_for('index') }}">Re-run with an updated resume</a>
