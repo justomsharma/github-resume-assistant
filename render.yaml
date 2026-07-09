@@ -9,7 +9,11 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -e ".[deploy]"
-    startCommand: gunicorn "resume_assistant.web.app:create_app()"
+    # gunicorn's default 30s request timeout is too short for /api/analyze:
+    # grading claims against repo evidence makes several Anthropic calls, and
+    # Render's free tier (0.1 CPU) is slow enough that this routinely exceeds
+    # 30s, so gunicorn SIGKILLs the worker mid-request (a real 500 in prod).
+    startCommand: gunicorn --timeout 120 "resume_assistant.web.app:create_app()"
     envVars:
       - key: ANTHROPIC_MODEL
         value: claude-sonnet-5
