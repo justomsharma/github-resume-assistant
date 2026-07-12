@@ -9,7 +9,13 @@ from resume_assistant.clients.github import GitHubError, RateLimitError, UserNot
 from resume_assistant.config import Config
 from resume_assistant.core.models import GapReport, Profile, ProjectPlan
 from resume_assistant.web import service
-from resume_assistant.web.service import AnalysisError, AnalysisResult, run_analysis
+from resume_assistant.web.service import (
+    AnalysisError,
+    AnalysisResult,
+    ProgressEvent,
+    run_analysis,
+    run_analysis_events,
+)
 
 
 @pytest.fixture
@@ -131,3 +137,91 @@ def test_anthropic_failure_maps_to_502(
 
     assert isinstance(outcome, AnalysisError)
     assert outcome.status == 502
+
+
+# --- run_analysis_events: real streamed progress -----------------------------
+
+
+def test_events_yield_four_stages_then_result(
+    mocker: MockerFixture, config: Config, profile_with_repos: Profile
+) -> None:
+    """Success streams a ProgressEvent per real stage (in order) then the result."""
+    _patch_profile(mocker, profile_with_repos)
+    _stub_anthropic(mocker)
+    report = GapReport(
+        profile_login="octocat",
+        backed=(),
+        not_shown=(),
+        not_verifiable=(),
+        github_is_empty=False,
+    )
+    plan = ProjectPlan(profile_login="octocat", suggestions=(), github_is_empty=False)
+    mocker.patch.object(service, "build_gap_report", return_value=report)
+    mocker.patch.object(service, "build_project_plan", return_value=plan)
+
+    events = list(run_analysis_events("resume text", "octocat", config))
+
+    progress = events[:-1]
+    terminal = events[-1]
+    assert [e.stage for e in progress] == ["profile", "evidence", "report", "plan"]
+    assert [e.index for e in progress] == [1, 2, 3, 4]
+    assert all(isinstance(e, ProgressEvent) and e.total == 4 for e in progress)
+    assert isinstance(terminal, AnalysisResult)
+    assert terminal.report is report
+    assert terminal.plan is plan
+
+
+def test_events_empty_github_still_streams_all_stages(
+    mocker: MockerFixture, config: Config, empty_profile: Profile
+) -> None:
+    """Our real user: an empty GitHub still streams all four stages to a result."""
+    _patch_profile(mocker, empty_profile)
+    _stub_anthropic(mocker)
+    report = GapReport(
+        profile_login="newgrad",
+        backed=(),
+        not_shown=(),
+        not_verifiable=(),
+        github_is_empty=True,
+    )
+    plan = ProjectPlan(profile_login="newgrad", suggestions=(), github_is_empty=True)
+    mocker.patch.object(service, "build_gap_report", return_value=report)
+    mocker.patch.object(service, "build_project_plan", return_value=plan)
+
+    events = list(run_analysis_events("resume text", "newgrad", config))
+
+    assert [e.stage for e in events[:-1]] == ["profile", "evidence", "report", "plan"]
+    assert isinstance(events[-1], AnalysisResult)
+    assert events[-1].report.github_is_empty is True
+
+
+def test_events_error_before_first_stage_yields_only_error(
+    mocker: MockerFixture, config: Config
+) -> None:
+    """A failure fetching the profile terminates with an error and no progress."""
+    instance = mocker.patch.object(service, "GitHubClient").return_value
+    instance.fetch_profile.side_effect = UserNotFoundError("nope")
+
+    events = list(run_analysis_events("resume text", "ghost", config))
+
+    assert len(events) == 1
+    assert isinstance(events[0], AnalysisError)
+    assert events[0].status == 404
+
+
+def test_events_anthropic_error_terminates_after_partial_progress(
+    mocker: MockerFixture, config: Config, profile_with_repos: Profile
+) -> None:
+    """Later-stage failures still emit the earlier stages' progress first."""
+    _patch_profile(mocker, profile_with_repos)
+    _stub_anthropic(mocker)
+    from resume_assistant.clients.anthropic import AnthropicError
+
+    mocker.patch.object(service, "build_gap_report", side_effect=AnthropicError("overloaded"))
+
+    events = list(run_analysis_events("resume text", "octocat", config))
+
+    # profile + evidence streamed before the report stage failed.
+    assert [e.stage for e in events[:-1]] == ["profile", "evidence"]
+    assert isinstance(events[-1], AnalysisError)
+    assert events[-1].status == 502
