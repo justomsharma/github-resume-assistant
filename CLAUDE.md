@@ -63,6 +63,10 @@ Rules for the chain:
 - A skill may **send you backwards**: if `/test`, `/self-review`, or `/review-pr`
   finds the approach was wrong, return to `/plan-first` — don't patch forward blindly.
 - Don't skip `/plan-first` or `/self-review`. Those two gates are the whole point.
+- **STOP after `/test`.** When local changes are made and tests pass, report the
+  results and let the user test locally. Do NOT auto-proceed to `/commit-push`,
+  `/open-pr`, `/review-pr`, or merge — those run **only when the user explicitly
+  says so** ("commit and push", "raise the MR").
 - After a merge, the next unit of work starts fresh at `/plan-first`.
 
 ## Non-negotiables
