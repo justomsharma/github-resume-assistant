@@ -20,7 +20,7 @@ from resume_assistant.core.models import (
 )
 from resume_assistant.web import app as webapp
 from resume_assistant.web.resume_upload import ResumeUploadError
-from resume_assistant.web.service import AnalysisError, AnalysisResult
+from resume_assistant.web.service import AnalysisError, AnalysisResult, ProgressEvent
 
 FRONTEND_ORIGIN = "http://127.0.0.1:3000"
 
@@ -229,6 +229,87 @@ def test_service_errors_return_friendly_json(
 
     assert resp.status_code == status
     assert needle in resp.get_json()["error"]
+
+
+def _parse_sse(body: str) -> list[dict]:
+    """Extract the JSON payloads from an SSE response body."""
+    import json
+
+    payloads = []
+    for block in body.strip().split("\n\n"):
+        for line in block.splitlines():
+            if line.startswith("data:"):
+                payloads.append(json.loads(line[len("data:") :].strip()))
+    return payloads
+
+
+def test_stream_emits_progress_then_result(
+    mocker: MockerFixture, client: FlaskClient, profile_with_repos: Profile
+) -> None:
+    """The stream endpoint sends progress SSE events, then a final result event."""
+    outcome = _result(profile_with_repos, False)
+
+    def events():
+        yield ProgressEvent(stage="profile", index=1, total=4, label="Fetching your GitHub profile")
+        yield ProgressEvent(stage="evidence", index=2, total=4, label="Reading your public repos")
+        yield outcome
+
+    mocker.patch.object(webapp, "run_analysis_events", return_value=events())
+
+    resp = client.post("/api/analyze/stream", data={"resume_text": "x", "username": "octocat"})
+
+    assert resp.status_code == 200
+    assert resp.content_type.startswith("text/event-stream")
+    assert resp.headers.get("X-Accel-Buffering") == "no"
+
+    payloads = _parse_sse(resp.get_data(as_text=True))
+    assert [p["type"] for p in payloads] == ["progress", "progress", "result"]
+    assert payloads[0]["stage"] == "profile"
+    assert payloads[0]["index"] == 1
+    assert payloads[-1]["report"]["profile_login"] == "octocat"
+    assert payloads[-1]["plan"]["github_is_empty"] is False
+
+
+def test_stream_delivers_mid_run_error_as_event(mocker: MockerFixture, client: FlaskClient) -> None:
+    """A failure once streaming has begun is delivered as an SSE error event (200)."""
+
+    def events():
+        yield ProgressEvent(stage="profile", index=1, total=4, label="Fetching your GitHub profile")
+        yield AnalysisError("Couldn't fetch GitHub data right now: boom", 502)
+
+    mocker.patch.object(webapp, "run_analysis_events", return_value=events())
+
+    resp = client.post("/api/analyze/stream", data={"resume_text": "x", "username": "octocat"})
+
+    assert resp.status_code == 200
+    payloads = _parse_sse(resp.get_data(as_text=True))
+    assert payloads[0]["type"] == "progress"
+    assert payloads[-1] == {"type": "error", "error": "Couldn't fetch GitHub data right now: boom"}
+
+
+def test_stream_blank_username_returns_400_before_streaming(
+    mocker: MockerFixture, client: FlaskClient
+) -> None:
+    run = mocker.patch.object(webapp, "run_analysis_events")
+
+    resp = client.post("/api/analyze/stream", data={"resume_text": "some resume", "username": ""})
+
+    assert resp.status_code == 400
+    assert resp.content_type.startswith("application/json")
+    assert "GitHub username" in resp.get_json()["error"]
+    run.assert_not_called()  # validation fails fast, before any streaming
+
+
+def test_stream_blank_resume_returns_400_before_streaming(
+    mocker: MockerFixture, client: FlaskClient
+) -> None:
+    run = mocker.patch.object(webapp, "run_analysis_events")
+
+    resp = client.post("/api/analyze/stream", data={"resume_text": "  ", "username": "octocat"})
+
+    assert resp.status_code == 400
+    assert "upload your resume" in resp.get_json()["error"]
+    run.assert_not_called()
 
 
 def test_cors_allows_configured_frontend_origin(

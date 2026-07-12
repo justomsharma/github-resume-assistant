@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { analyze, AnalysisRequestError } from "@/lib/api";
+import { analyzeWithProgress, AnalysisRequestError } from "@/lib/api";
 import type { AnalysisResponse } from "@/lib/types";
 import Sidebar from "@/components/Sidebar";
 import LandingForm from "@/components/LandingForm";
@@ -16,13 +16,16 @@ export default function Home() {
   const [handle, setHandle] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResponse | null>(null);
+  const [progress, setProgress] = useState(0);
 
   async function handleSubmit(file: File, username: string) {
     setError(null);
     setHandle(username);
+    setProgress(0);
     setScreen("loading");
     try {
-      const response = await analyze(file, username);
+      const response = await analyzeWithProgress(file, username, setProgress);
+      setProgress(1);
       setResult(response);
       setScreen("results");
     } catch (err) {
@@ -74,7 +77,7 @@ export default function Home() {
           <main className="main">
             {screen === "loading" ? (
               <section className="screen active">
-                <LoadingScreen handle={handle ? `@${handle}` : "your"} />
+                <LoadingScreen handle={handle ? `@${handle}` : "your"} progress={progress} />
               </section>
             ) : (
               <section className="screen active">
