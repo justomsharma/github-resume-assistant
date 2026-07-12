@@ -28,9 +28,10 @@ from resume_assistant.core.models import (
 )
 
 _MAX_TOKENS = 2048
-# Verifying claims sends real code evidence plus a graded verdict per claim, so it
-# needs a larger budget than extraction, like suggestions.
-_VERIFY_MAX_TOKENS = 4096
+# Verifying claims sends real code evidence plus a graded verdict (with a prose
+# rationale) per claim, so it needs a large budget or the JSON truncates mid-object.
+# _parse_verdicts salvages a truncated response, but a bigger budget avoids it.
+_VERIFY_MAX_TOKENS = 8192
 # Per-batch cap on rendered evidence characters. "All repos" evidence can be large,
 # so we split it into batches under this budget and merge the verdicts.
 _EVIDENCE_CHAR_BUDGET = 12000
@@ -462,15 +463,18 @@ def _parse_verdicts(raw: str, claims: list[Claim]) -> list[ClaimEvidence]:
 
     Verdicts are matched back to claims by verbatim text. Any claim the model
     skipped, or gave an unknown verdict, degrades to ``not_shown`` rather than
-    crashing — an honest gap beats a fabricated pass.
+    crashing — an honest gap beats a fabricated pass. A truncated or garbled
+    response is treated the same way: we salvage whatever complete verdict
+    objects we can and let the rest fall to ``not_shown``, never failing the run.
     """
     payload = _extract_json_object(raw)
     try:
         data = json.loads(payload)
-    except json.JSONDecodeError as exc:
-        raise AnthropicError("Anthropic returned an unparseable verdicts response.") from exc
+        items = data.get("verdicts", []) if isinstance(data, dict) else []
+    except json.JSONDecodeError:
+        # Truncated/garbled JSON (e.g. hit max_tokens): recover the complete objects.
+        items = _salvage_verdict_items(raw)
 
-    items = data.get("verdicts", []) if isinstance(data, dict) else []
     by_text: dict[str, dict[str, Any]] = {}
     for item in items:
         if isinstance(item, dict):
@@ -479,6 +483,43 @@ def _parse_verdicts(raw: str, claims: list[Claim]) -> list[ClaimEvidence]:
                 by_text[text] = item
 
     return [_verdict_for(claim, by_text.get(claim.text.strip())) for claim in claims]
+
+
+def _salvage_verdict_items(raw: str) -> list[dict[str, Any]]:
+    """Recover the complete ``{...}`` verdict objects from a truncated JSON response.
+
+    Every balanced-brace span is parsed on its own (via a start-index stack, so
+    the objects nested inside an unclosed ``{"verdicts": [...]}`` wrapper are still
+    recovered); a final object cut off mid-stream never balances and is skipped.
+    Braces inside string values are ignored, and only objects carrying a ``claim``
+    key are kept, so stray non-verdict braces don't leak in.
+    """
+    items: list[dict[str, Any]] = []
+    starts: list[int] = []
+    in_string = False
+    escaped = False
+    for i, char in enumerate(raw):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            starts.append(i)
+        elif char == "}" and starts:
+            start = starts.pop()
+            try:
+                obj = json.loads(raw[start : i + 1])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(obj, dict) and "claim" in obj:
+                items.append(obj)
+    return items
 
 
 def _verdict_for(claim: Claim, item: dict[str, Any] | None) -> ClaimEvidence:
