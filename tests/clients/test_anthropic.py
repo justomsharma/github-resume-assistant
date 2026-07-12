@@ -524,9 +524,39 @@ def test_verify_batches_evidence_and_merges_backed_wins(mocker: MockerFixture) -
     assert verdicts[0].cited_files == ("repo-a/cache.go",)
 
 
-def test_verify_unparseable_raises(mocker: MockerFixture) -> None:
+def test_verify_unparseable_degrades_to_not_shown(mocker: MockerFixture) -> None:
+    """A garbled response must not crash the run — every claim becomes an honest gap."""
     instance = _patch_sdk(mocker)
     instance.messages.create.return_value = _text_response("not json at all")
 
-    with pytest.raises(AnthropicError):
-        AnthropicClient(api_key="k", model="claude-sonnet-5").verify_claims(_CLAIMS, _evidence())
+    verdicts = AnthropicClient(api_key="k", model="claude-sonnet-5").verify_claims(
+        _CLAIMS, _evidence()
+    )
+
+    assert [v.claim.text for v in verdicts] == [c.text for c in _CLAIMS]  # order preserved
+    assert all(v.verdict == "not_shown" for v in verdicts)
+
+
+def test_verify_truncated_response_salvages_complete_verdicts(mocker: MockerFixture) -> None:
+    """A response cut off mid-object keeps the complete verdicts; the rest degrade."""
+    instance = _patch_sdk(mocker)
+    # Two complete verdict objects, then a third cut off mid-stream (hit max_tokens).
+    instance.messages.create.return_value = _text_response(
+        '{"verdicts": ['
+        '{"claim": "Built a distributed cache in Go", "verdict": "backed", '
+        '"cited_files": ["go-cache/src/cache.go"], "rationale": "LRU cache in cache.go"},'
+        '{"claim": "Proficient in React", "verdict": "not_verifiable", '
+        '"cited_files": [], "rationale": "no React code"},'
+        '{"claim": "Handled 300+ requests/day", "verdict": "not_sho'
+    )
+
+    verdicts = AnthropicClient(api_key="k", model="claude-sonnet-5").verify_claims(
+        _CLAIMS, _evidence()
+    )
+
+    # The two complete objects survive with their verdict + cited files intact.
+    assert verdicts[0].verdict == "backed"
+    assert verdicts[0].cited_files == ("go-cache/src/cache.go",)
+    assert verdicts[1].verdict == "not_verifiable"
+    # The third claim was cut off mid-object, so it falls to an honest gap.
+    assert verdicts[2].verdict == "not_shown"
