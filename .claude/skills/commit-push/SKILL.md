@@ -7,6 +7,13 @@ description: Safely commit reviewed changes with a Conventional Commit message a
 
 Commit and push the reviewed changes. Follow `docs/GIT_WORKFLOW.md`.
 
+## Gate — requires explicit user go-ahead
+
+Do NOT run this skill (or `/open-pr`, `/review-pr`, or merge) on your own after
+tests pass. Committing, pushing, opening the MR/PR, and merging happen **only when
+the user explicitly asks** ("commit and push", "raise the MR", etc.). If you
+reached here without that explicit instruction, STOP and ask first.
+
 ## Safe sequence
 
 1. **Branch check** — confirm you are NOT on `main`. If you are, create a branch:
