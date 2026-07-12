@@ -6,7 +6,7 @@ import type { AnalysisResponse } from "@/lib/types";
 import Sidebar from "@/components/Sidebar";
 import LandingForm from "@/components/LandingForm";
 import LoadingScreen from "@/components/LoadingScreen";
-import ResultsPanels from "@/components/ResultsPanels";
+import AnalysisDashboard from "@/components/AnalysisDashboard";
 import ThemeToggle from "@/components/ThemeToggle";
 
 type Screen = "landing" | "loading" | "results";
@@ -44,28 +44,10 @@ export default function Home() {
 
   if (screen === "results" && result) {
     return (
-      <div className="app">
-        <div className="top">
-          <div className="who">
-            <span>@{result.report.profile_login}</span> ·{" "}
-            <button className="edit" type="button" onClick={reset}>
-              edit inputs
-            </button>
-          </div>
-        </div>
-        <section className="screen active">
-          <ResultsPanels report={result.report} plan={result.plan} />
-          <div className="cta">
-            <button className="btn btn-s" type="button" onClick={reset}>
-              Re-run with an updated resume
-            </button>
-            <span className="foothint">
-              Grounded in @{result.report.profile_login}&rsquo;s real public repos.
-            </span>
-          </div>
-        </section>
+      <>
+        <AnalysisDashboard result={result} onBackToHome={reset} />
         <ThemeToggle />
-      </div>
+      </>
     );
   }
 
