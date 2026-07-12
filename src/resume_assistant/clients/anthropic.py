@@ -404,14 +404,20 @@ def _response_text(response: Any) -> str:
 
 
 def _parse_claims(raw: str) -> list[Claim]:
-    """Parse the model's JSON payload into Claim models, tolerating stray prose."""
+    """Parse the model's JSON payload into Claim models, tolerating stray prose.
+
+    A truncated or garbled response salvages whatever complete claim objects it
+    can rather than failing the run — an empty list is an honest "no claims", not
+    a crash.
+    """
     payload = _extract_json_object(raw)
     try:
         data = json.loads(payload)
-    except json.JSONDecodeError as exc:
-        raise AnthropicError("Anthropic returned an unparseable claims response.") from exc
+        items = data.get("claims", []) if isinstance(data, dict) else []
+    except json.JSONDecodeError:
+        # Truncated/garbled JSON (e.g. hit max_tokens): recover the complete objects.
+        items = _salvage_objects(raw, "text")
 
-    items = data.get("claims", []) if isinstance(data, dict) else []
     claims: list[Claim] = []
     for item in items:
         if not isinstance(item, dict):
@@ -426,16 +432,19 @@ def _parse_claims(raw: str) -> list[Claim]:
 
 
 def _parse_suggestions(raw: str) -> list[Suggestion]:
-    """Parse the model's JSON payload into Suggestion models, tolerating stray prose."""
+    """Parse the model's JSON payload into Suggestion models, tolerating stray prose.
+
+    A truncated or garbled response salvages whatever complete suggestion objects
+    it can (each needs a title and what_to_build) rather than failing the run.
+    """
     payload = _extract_json_object(raw)
     try:
         data = json.loads(payload)
-    except json.JSONDecodeError as exc:
-        raise AnthropicError(
-            "Anthropic returned an incomplete or non-JSON suggestions response."
-        ) from exc
+        items = data.get("suggestions", []) if isinstance(data, dict) else []
+    except json.JSONDecodeError:
+        # Truncated/garbled JSON (e.g. hit max_tokens): recover the complete objects.
+        items = _salvage_objects(raw, "title")
 
-    items = data.get("suggestions", []) if isinstance(data, dict) else []
     suggestions: list[Suggestion] = []
     for item in items:
         if not isinstance(item, dict):
@@ -473,7 +482,7 @@ def _parse_verdicts(raw: str, claims: list[Claim]) -> list[ClaimEvidence]:
         items = data.get("verdicts", []) if isinstance(data, dict) else []
     except json.JSONDecodeError:
         # Truncated/garbled JSON (e.g. hit max_tokens): recover the complete objects.
-        items = _salvage_verdict_items(raw)
+        items = _salvage_objects(raw, "claim")
 
     by_text: dict[str, dict[str, Any]] = {}
     for item in items:
@@ -485,14 +494,14 @@ def _parse_verdicts(raw: str, claims: list[Claim]) -> list[ClaimEvidence]:
     return [_verdict_for(claim, by_text.get(claim.text.strip())) for claim in claims]
 
 
-def _salvage_verdict_items(raw: str) -> list[dict[str, Any]]:
-    """Recover the complete ``{...}`` verdict objects from a truncated JSON response.
+def _salvage_objects(raw: str, required_key: str) -> list[dict[str, Any]]:
+    """Recover the complete ``{...}`` objects from a truncated/garbled JSON response.
 
     Every balanced-brace span is parsed on its own (via a start-index stack, so
-    the objects nested inside an unclosed ``{"verdicts": [...]}`` wrapper are still
+    objects nested inside an unclosed ``{"<key>": [...]}`` wrapper are still
     recovered); a final object cut off mid-stream never balances and is skipped.
-    Braces inside string values are ignored, and only objects carrying a ``claim``
-    key are kept, so stray non-verdict braces don't leak in.
+    Braces inside string values are ignored, and only objects carrying
+    ``required_key`` are kept, so stray non-payload braces don't leak in.
     """
     items: list[dict[str, Any]] = []
     starts: list[int] = []
@@ -517,7 +526,7 @@ def _salvage_verdict_items(raw: str) -> list[dict[str, Any]]:
                 obj = json.loads(raw[start : i + 1])
             except json.JSONDecodeError:
                 continue
-            if isinstance(obj, dict) and "claim" in obj:
+            if isinstance(obj, dict) and required_key in obj:
                 items.append(obj)
     return items
 

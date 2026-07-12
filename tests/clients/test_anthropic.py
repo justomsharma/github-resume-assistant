@@ -170,12 +170,33 @@ def test_extract_claims_tolerates_prose_around_json(mocker: MockerFixture) -> No
     assert claims[0].text == "Did a thing"
 
 
-def test_extract_claims_unparseable_raises(mocker: MockerFixture) -> None:
+def test_extract_claims_unparseable_degrades_to_empty(mocker: MockerFixture) -> None:
+    """A garbled claims response must not crash the run — degrade to no claims."""
     instance = _patch_sdk(mocker)
     instance.messages.create.return_value = _text_response("not json at all")
 
-    with pytest.raises(AnthropicError):
-        AnthropicClient(api_key="k", model="claude-sonnet-5").extract_claims("r")
+    claims = AnthropicClient(api_key="k", model="claude-sonnet-5").extract_claims("r")
+
+    assert claims == []
+
+
+def test_truncated_claims_response_salvages_complete_claims(mocker: MockerFixture) -> None:
+    """A claims response cut off mid-object keeps the complete claims; the rest drop."""
+    instance = _patch_sdk(mocker)
+    # Two complete claim objects, then a third cut off mid-stream (hit max_tokens).
+    instance.messages.create.return_value = _text_response(
+        '{"claims": ['
+        '{"text": "Built a distributed cache in Go", "skills": ["Go"], "category": "project"},'
+        '{"text": "Proficient in React", "skills": ["React"], "category": "skill"},'
+        '{"text": "Handled 300+ requests',
+    )
+
+    claims = AnthropicClient(api_key="k", model="claude-sonnet-5").extract_claims("r")
+
+    assert len(claims) == 2  # the two complete objects survive; the cut-off one is dropped
+    assert claims[0].text == "Built a distributed cache in Go"
+    assert claims[0].skills == ("go",)  # normalized to lowercase
+    assert claims[1].text == "Proficient in React"
 
 
 def test_extract_claims_api_error_wrapped(mocker: MockerFixture) -> None:
@@ -262,14 +283,16 @@ def test_generate_suggestions_skips_incomplete_items(mocker: MockerFixture) -> N
     assert suggestions[0].title == "Real"
 
 
-def test_generate_suggestions_unparseable_raises(mocker: MockerFixture) -> None:
+def test_generate_suggestions_unparseable_degrades_to_empty(mocker: MockerFixture) -> None:
+    """A garbled suggestions response must not crash the run — degrade to no suggestions."""
     instance = _patch_sdk(mocker)
     instance.messages.create.return_value = _text_response("not json at all")
 
-    with pytest.raises(AnthropicError):
-        AnthropicClient(api_key="k", model="claude-sonnet-5").generate_suggestions(
-            _gap_report(empty=False), _profile(empty=False)
-        )
+    suggestions = AnthropicClient(api_key="k", model="claude-sonnet-5").generate_suggestions(
+        _gap_report(empty=False), _profile(empty=False)
+    )
+
+    assert suggestions == []
 
 
 def test_generate_suggestions_api_error_wrapped(mocker: MockerFixture) -> None:
@@ -321,20 +344,29 @@ def test_suggestions_use_larger_token_budget_than_claims(mocker: MockerFixture) 
     assert suggest_tokens > claim_tokens
 
 
-def test_truncated_suggestions_response_raises_clear_error(mocker: MockerFixture) -> None:
+def test_truncated_suggestions_response_salvages_complete(mocker: MockerFixture) -> None:
+    """A suggestions response cut off mid-object keeps the complete ones; the rest drop."""
     instance = _patch_sdk(mocker)
-    # A response cut off mid-object: valid prefix, no closing braces — what a
-    # too-small max_tokens produced before the fix.
+    # Two complete suggestion objects, then a third cut off mid-stream (hit max_tokens).
     instance.messages.create.return_value = _text_response(
-        '{"suggestions": [{"title": "React app", "what_to_build": "A dashb'
+        '{"suggestions": ['
+        '{"title": "React dashboard", "what_to_build": "A small dashboard", '
+        '"proves_claim": "Proficient in React", "skills": ["React"], '
+        '"size": "a weekend", "skip": "auth"},'
+        '{"title": "Go LRU cache", "what_to_build": "A concurrent cache", '
+        '"proves_claim": "Built a cache in Go", "skills": ["Go"], '
+        '"size": "a week", "skip": "distribution"},'
+        '{"title": "Truncated app", "what_to_build": "A dashb',
     )
 
-    with pytest.raises(AnthropicError) as excinfo:
-        AnthropicClient(api_key="k", model="claude-sonnet-5").generate_suggestions(
-            _gap_report(empty=False), _profile(empty=False)
-        )
+    suggestions = AnthropicClient(api_key="k", model="claude-sonnet-5").generate_suggestions(
+        _gap_report(empty=False), _profile(empty=False)
+    )
 
-    assert "incomplete or non-JSON" in str(excinfo.value)
+    assert len(suggestions) == 2  # the two complete objects survive; the cut-off one drops
+    assert suggestions[0].title == "React dashboard"
+    assert suggestions[1].title == "Go LRU cache"
+    assert suggestions[1].skills == ("go",)
 
 
 def test_transient_error_is_retried_then_succeeds(mocker: MockerFixture) -> None:
