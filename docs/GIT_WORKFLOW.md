@@ -46,6 +46,7 @@ Rules:
 ## Opening a PR (what /open-pr does)
 
 - Push the branch, then `gh pr create`.
+- **Always assign the PR to the repo owner (`justomsharma`)** — `gh pr create --assignee justomsharma ...` (or `gh pr edit <n> --add-assignee justomsharma` if the PR already exists). Never leave a PR unassigned.
 - PR title = the main Conventional Commit summary.
 - PR body uses this template:
 
@@ -85,6 +86,14 @@ Review against these, in order:
 
 Leave specific, actionable comments (`file:line` + suggested fix). Approve only
 when correctness and tests pass. Be direct and kind.
+
+**Always leave a comment on the PR recording the review outcome, then act on it:**
+- If review finds problems: post a comment listing them, fix them (back to
+  `/implement` or `/plan-first` if the issue is deeper), push the fix, and
+  re-review before merging. Do not merge with unresolved findings.
+- If the review is clean: post a comment stating that the implementation was
+  reviewed and everything is correct (e.g. "Reviewed — implemented correctly,
+  tests pass, no issues found."), then merge.
 
 ## Since this is a solo public repo (for now)
 

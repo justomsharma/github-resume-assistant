@@ -163,9 +163,9 @@ def test_events_yield_four_stages_then_result(
 
     progress = events[:-1]
     terminal = events[-1]
-    assert [e.stage for e in progress] == ["profile", "evidence", "report", "plan"]
-    assert [e.index for e in progress] == [1, 2, 3, 4]
-    assert all(isinstance(e, ProgressEvent) and e.total == 4 for e in progress)
+    assert [e.stage for e in progress] == ["parsing", "profile", "evidence", "report", "plan"]
+    assert [e.index for e in progress] == [1, 2, 3, 4, 5]
+    assert all(isinstance(e, ProgressEvent) and e.total == 5 for e in progress)
     assert isinstance(terminal, AnalysisResult)
     assert terminal.report is report
     assert terminal.plan is plan
@@ -190,7 +190,7 @@ def test_events_empty_github_still_streams_all_stages(
 
     events = list(run_analysis_events("resume text", "newgrad", config))
 
-    assert [e.stage for e in events[:-1]] == ["profile", "evidence", "report", "plan"]
+    assert [e.stage for e in events[:-1]] == ["parsing", "profile", "evidence", "report", "plan"]
     assert isinstance(events[-1], AnalysisResult)
     assert events[-1].report.github_is_empty is True
 
@@ -198,15 +198,16 @@ def test_events_empty_github_still_streams_all_stages(
 def test_events_error_before_first_stage_yields_only_error(
     mocker: MockerFixture, config: Config
 ) -> None:
-    """A failure fetching the profile terminates with an error and no progress."""
+    """A failure fetching the profile terminates with an error after only the parsing stage."""
     instance = mocker.patch.object(service, "GitHubClient").return_value
     instance.fetch_profile.side_effect = UserNotFoundError("nope")
 
     events = list(run_analysis_events("resume text", "ghost", config))
 
-    assert len(events) == 1
-    assert isinstance(events[0], AnalysisError)
-    assert events[0].status == 404
+    assert len(events) == 2
+    assert isinstance(events[0], ProgressEvent) and events[0].stage == "parsing"
+    assert isinstance(events[1], AnalysisError)
+    assert events[1].status == 404
 
 
 def test_events_anthropic_error_terminates_after_partial_progress(
@@ -221,7 +222,7 @@ def test_events_anthropic_error_terminates_after_partial_progress(
 
     events = list(run_analysis_events("resume text", "octocat", config))
 
-    # profile + evidence streamed before the report stage failed.
-    assert [e.stage for e in events[:-1]] == ["profile", "evidence"]
+    # parsing + profile + evidence streamed before the report stage failed.
+    assert [e.stage for e in events[:-1]] == ["parsing", "profile", "evidence"]
     assert isinstance(events[-1], AnalysisError)
     assert events[-1].status == 502

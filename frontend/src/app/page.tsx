@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { analyzeWithProgress, AnalysisRequestError } from "@/lib/api";
 import type { AnalysisResponse } from "@/lib/types";
 import Sidebar from "@/components/Sidebar";
+import DashboardSidebar from "@/components/DashboardSidebar";
 import LandingForm from "@/components/LandingForm";
-import LoadingScreen from "@/components/LoadingScreen";
+import AnalysisProgress from "@/components/AnalysisProgress";
 import AnalysisDashboard from "@/components/AnalysisDashboard";
 import ThemeToggle from "@/components/ThemeToggle";
 
@@ -17,23 +18,35 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResponse | null>(null);
   const [progress, setProgress] = useState(0);
+  const controllerRef = useRef<AbortController | null>(null);
 
   async function handleSubmit(file: File, username: string) {
     setError(null);
     setHandle(username);
     setProgress(0);
     setScreen("loading");
+    const controller = new AbortController();
+    controllerRef.current = controller;
     try {
-      const response = await analyzeWithProgress(file, username, setProgress);
+      const response = await analyzeWithProgress(file, username, setProgress, controller.signal);
       setProgress(1);
       setResult(response);
       setScreen("results");
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // User-initiated cancel: just go back to landing, no error to show.
+        setScreen("landing");
+        return;
+      }
       const message =
         err instanceof AnalysisRequestError ? err.message : "Something went wrong. Try again.";
       setError(message);
       setScreen("landing");
     }
+  }
+
+  function cancelAnalysis() {
+    controllerRef.current?.abort();
   }
 
   function reset() {
@@ -51,18 +64,31 @@ export default function Home() {
     );
   }
 
+  if (screen === "loading") {
+    return (
+      <div className="dash">
+        <div className="dshell">
+          <DashboardSidebar profileLogin={handle || "you"} onBackToHome={cancelAnalysis} />
+          <main className="dmain">
+            <AnalysisProgress
+              handle={handle ? `@${handle}` : "your"}
+              progress={progress}
+              onCancel={cancelAnalysis}
+            />
+          </main>
+        </div>
+        <ThemeToggle />
+      </div>
+    );
+  }
+
   return (
     <div className="v-ai">
       <div className="app">
         <div className="shell">
           <Sidebar />
           <main className="main">
-            {screen === "loading" ? (
-              <section className="screen active">
-                <LoadingScreen handle={handle ? `@${handle}` : "your"} progress={progress} />
-              </section>
-            ) : (
-              <section className="screen active">
+            <section className="screen active">
                 <div className="hgroup">
                   <span className="pill">Grounded in your real GitHub ⚡</span>
                   <h1>
@@ -98,7 +124,6 @@ export default function Home() {
                   </div>
                 </div>
               </section>
-            )}
           </main>
         </div>
       </div>

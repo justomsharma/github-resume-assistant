@@ -26,7 +26,7 @@ interface StatCardProps {
   subTone?: "good" | "muted";
 }
 
-/** A stat card with an optional SVG progress ring (adapted from LoadingScreen's ring). */
+/** A stat card with an optional SVG progress ring. */
 function StatCard({ label, value, sub, pct, subTone = "good" }: StatCardProps) {
   const radius = 30;
   const circumference = 2 * Math.PI * radius;

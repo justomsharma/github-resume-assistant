@@ -30,7 +30,11 @@ class StreamUnavailableError extends Error {
  * grounded gap report + 30-day plan. Throws AnalysisRequestError with the
  * backend's friendly message on any 4xx/5xx (bad file, rate limit, etc).
  */
-export async function analyze(file: File, username: string): Promise<AnalysisResponse> {
+export async function analyze(
+  file: File,
+  username: string,
+  signal?: AbortSignal,
+): Promise<AnalysisResponse> {
   const formData = new FormData();
   formData.append("resume_file", file);
   formData.append("username", username);
@@ -38,6 +42,7 @@ export async function analyze(file: File, username: string): Promise<AnalysisRes
   const response = await fetch(`${API_URL}/api/analyze`, {
     method: "POST",
     body: formData,
+    signal,
   });
 
   if (response.status === 413) {
@@ -66,14 +71,15 @@ export async function analyzeWithProgress(
   file: File,
   username: string,
   onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
 ): Promise<AnalysisResponse> {
   try {
-    return await analyzeStream(file, username, onProgress);
+    return await analyzeStream(file, username, onProgress, signal);
   } catch (err) {
     if (!(err instanceof StreamUnavailableError)) throw err;
     // Streaming blocked/buffered by the host — fall back without failing the page.
   }
-  return analyzeWithTimeFill(file, username, onProgress);
+  return analyzeWithTimeFill(file, username, onProgress, signal);
 }
 
 /** POST to the SSE endpoint and parse real per-stage progress events. */
@@ -81,6 +87,7 @@ async function analyzeStream(
   file: File,
   username: string,
   onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
 ): Promise<AnalysisResponse> {
   const formData = new FormData();
   formData.append("resume_file", file);
@@ -88,8 +95,13 @@ async function analyzeStream(
 
   let response: Response;
   try {
-    response = await fetch(`${API_URL}/api/analyze/stream`, { method: "POST", body: formData });
-  } catch {
+    response = await fetch(`${API_URL}/api/analyze/stream`, {
+      method: "POST",
+      body: formData,
+      signal,
+    });
+  } catch (err) {
+    if (signal?.aborted) throw err;
     throw new StreamUnavailableError();
   }
 
@@ -148,6 +160,7 @@ async function analyzeWithTimeFill(
   file: File,
   username: string,
   onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
 ): Promise<AnalysisResponse> {
   const EXPECTED_MS = 20_000;
   const start = Date.now();
@@ -159,7 +172,7 @@ async function analyzeWithTimeFill(
     onProgress(0.95 * (1 - Math.exp(-elapsed / (EXPECTED_MS / 3))));
   }, 200);
   try {
-    return await analyze(file, username);
+    return await analyze(file, username, signal);
   } finally {
     finished = true;
     clearInterval(timer);
