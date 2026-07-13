@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { AnalysisResponse } from "@/lib/types";
 import { totalClaims } from "@/lib/types";
 import { deriveDashboardStats } from "@/lib/deriveStats";
+import { buildReportMarkdown, buildShareSummary } from "@/lib/reportText";
 import DashboardSidebar from "./DashboardSidebar";
 
 type Tab = "overview" | "skills" | "experience" | "projects" | "recommendations";
@@ -91,10 +92,28 @@ export default function AnalysisDashboard({
   onBackToHome: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("overview");
+  const [copied, setCopied] = useState(false);
   const { report, plan } = result;
   const stats = deriveDashboardStats(result);
   const total = totalClaims(report);
   const topSuggestion = plan.suggestions[0];
+
+  function handleDownload() {
+    const markdown = buildReportMarkdown(result);
+    const blob = new Blob([markdown], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "resume-analysis-report.md";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleShare() {
+    await navigator.clipboard.writeText(buildShareSummary(result));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   return (
     <div className="dash">
@@ -111,11 +130,11 @@ export default function AnalysisDashboard({
               <p className="dsub">Here&rsquo;s your personalized analysis report.</p>
             </div>
             <div className="dtop-actions">
-              <button type="button" className="dbtn dbtn-ghost" disabled title="Coming soon">
+              <button type="button" className="dbtn dbtn-ghost" onClick={handleDownload}>
                 ⬇ Download Report
               </button>
-              <button type="button" className="dbtn dbtn-primary" disabled title="Coming soon">
-                ⇄ Share Report
+              <button type="button" className="dbtn dbtn-primary" onClick={handleShare}>
+                {copied ? "✓ Copied!" : "⇄ Share Report"}
               </button>
             </div>
           </div>
