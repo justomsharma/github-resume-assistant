@@ -27,6 +27,26 @@ your real GitHub. So the whole product is built around that grounding:
 
 The grounding in real repo data is the moat. Everything else serves it.
 
+## The moat, quantified
+
+Take one resume line: *"Built a distributed caching layer in Go."*
+
+- **ChatGPT copy-paste:** reads fine, sounds specific, gets a pass. It has no way
+  to check it, so it doesn't try — the words are all it has.
+- **This tool:** pulls every non-fork repo, parses dependency manifests, walks
+  the file tree, reads the README, and grades the claim against that evidence.
+  It comes back one of three ways:
+  - **`backed`** — cites the actual file, e.g. "`cache/store.go` implements an
+    LRU cache with TTL eviction, imported by `server/app.go`."
+  - **`not_shown`** — no repo touches caching or Go at all. The claim is
+    unprovable from what's public, which is the real gap to close.
+  - **`not_verifiable`** — the repo has a cache, but "distributed" (multi-node,
+    consistent hashing, etc.) can't be confirmed from static code alone.
+
+Same sentence, three structurally different outcomes depending on what's
+actually public — and only one of them tells you what to build next. That gap
+is the whole product.
+
 ## The three tools
 
 | Tool | Role | What it does |
@@ -70,10 +90,13 @@ now and keeps a future web front-end a wrapper rather than a rewrite.
 - **v1's only user is me.** That's a feature: instant feedback, zero user-research
   overhead, and the fastest path to knowing if the advice is actually good.
 - No accounts, no auth, no multi-user database — SQLite is enough.
-- No web app yet. Job-seekers don't install MCP servers; engineers do. A no-install
-  web surface is the v2 bet, and only earns its place once v1 proves the advice is
-  worth installing anything for.
-- Only public GitHub and pasted resume text — no private-repo or LinkedIn awareness.
+- The v2 bet paid off: a no-install web app now sits over the same `core/`
+  engine — a Next.js + TypeScript frontend calling a Flask JSON API, deployed
+  on Vercel/Render — so job-seekers who won't install an MCP server get the
+  same grounded gap report and 30-day plan. The MCP server stays the other
+  front door, for engineers and the portfolio story.
+- Only public GitHub and pasted resume text (or an uploaded PDF/DOCX on the
+  web app) — no private-repo or LinkedIn awareness.
 
 See [`ROADMAP.md`](ROADMAP.md) for what each version includes and
 [`PRODUCT.md`](PRODUCT.md) for the full rationale.
