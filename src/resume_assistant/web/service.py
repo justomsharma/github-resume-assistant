@@ -62,9 +62,10 @@ class ProgressEvent:
     label: str
 
 
-# The four real stages of run_analysis_events, in order. The labels are shown in
+# The five real stages of run_analysis_events, in order. The labels are shown in
 # the loading UI's step list, so they read as user-facing progress, not internals.
 _STAGES: tuple[tuple[str, str], ...] = (
+    ("parsing", "Parsing your resume"),
     ("profile", "Fetching your GitHub profile"),
     ("evidence", "Reading your public repos"),
     ("report", "Matching your resume claims against your repos"),
@@ -101,6 +102,11 @@ def run_analysis_events(
     github = GitHubClient(token=config.github_token)
     cache = SqliteCache(config.cache_path)
 
+    # Parsing already happened synchronously in the web layer before this generator
+    # started (resume_upload.extract_resume_text), so reporting it here is just
+    # telling the truth about completed work, not simulating a stage.
+    yield _stage_event(0)
+
     try:
         profile = github.fetch_profile(username)
     except UserNotFoundError:
@@ -112,7 +118,7 @@ def run_analysis_events(
     except GitHubError as exc:
         yield AnalysisError(f"Couldn't fetch GitHub data right now: {exc}", 502)
         return
-    yield _stage_event(0)
+    yield _stage_event(1)
 
     try:
         evidence = CachingRepoEvidenceFetcher(github, cache=cache).fetch_repo_evidence(profile)
@@ -122,7 +128,7 @@ def run_analysis_events(
     except GitHubError as exc:
         yield AnalysisError(f"Couldn't fetch GitHub data right now: {exc}", 502)
         return
-    yield _stage_event(1)
+    yield _stage_event(2)
 
     try:
         client = AnthropicClient(api_key=config.anthropic_api_key, model=config.anthropic_model)
@@ -132,7 +138,7 @@ def run_analysis_events(
     except AnthropicError as exc:
         yield AnalysisError(f"Couldn't analyze the resume right now: {exc}", 502)
         return
-    yield _stage_event(2)
+    yield _stage_event(3)
 
     try:
         suggester = CachingSuggestionGenerator(client, cache=cache, model=config.anthropic_model)
@@ -140,7 +146,7 @@ def run_analysis_events(
     except AnthropicError as exc:
         yield AnalysisError(f"Couldn't analyze the resume right now: {exc}", 502)
         return
-    yield _stage_event(3)
+    yield _stage_event(4)
 
     yield AnalysisResult(profile=profile, report=report, plan=plan)
 
