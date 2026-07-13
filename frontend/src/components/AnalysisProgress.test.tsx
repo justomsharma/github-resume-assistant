@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { axe } from "vitest-axe";
 import AnalysisProgress from "./AnalysisProgress";
 
 /** Force the reduced-motion branch so the displayed value snaps to `progress`
@@ -94,5 +95,10 @@ describe("AnalysisProgress", () => {
 
     await user.click(screen.getByRole("button", { name: /Cancel Analysis/ }));
     expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it("has no axe violations", async () => {
+    const { container } = render(<AnalysisProgress handle="@octocat" progress={0.5} onCancel={vi.fn()} />);
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

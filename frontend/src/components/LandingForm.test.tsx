@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { axe } from "vitest-axe";
 import LandingForm from "./LandingForm";
 
 describe("LandingForm", () => {
@@ -38,5 +39,10 @@ describe("LandingForm", () => {
       />,
     );
     expect(screen.getByRole("alert")).toHaveTextContent("Something went wrong.");
+  });
+
+  it("has no axe violations", async () => {
+    const { container } = render(<LandingForm error={null} submitting={false} onSubmit={vi.fn()} />);
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

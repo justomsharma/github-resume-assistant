@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "audit:lighthouse": "npx lighthouse http://localhost:3000 --output=json --output=html --output-path=./lighthouse-report-desktop --preset=desktop --chrome-flags=\"--headless\" && npx lighthouse http://localhost:3000 --output=json --output=html --output-path=./lighthouse-report-mobile --chrome-flags=\"--headless\""
   },
   "dependencies": {
     "next": "16.2.10",
@@ -22,10 +23,13 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.0.3",
+    "axe-core": "^4.12.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "jsdom": "^29.1.1",
+    "lighthouse": "^13.4.0",
     "typescript": "^5",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "vitest-axe": "^0.1.0"
   }
 }

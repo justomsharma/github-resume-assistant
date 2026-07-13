@@ -107,7 +107,14 @@ export default function AnalysisProgress({
         </div>
       </div>
 
-      <div className="pstep-list" role="progressbar" aria-valuenow={Math.round(display * 100)} aria-valuemin={0} aria-valuemax={100}>
+      <div
+        className="pstep-list"
+        role="progressbar"
+        aria-label="Analysis progress"
+        aria-valuenow={Math.round(display * 100)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
         {STEPS.map((step, i) => {
           const state = i < doneCount ? "done" : i === doneCount ? "now" : "pending";
           const stepPct =
