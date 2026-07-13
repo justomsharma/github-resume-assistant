@@ -19,6 +19,8 @@ from dataclasses import asdict
 from flask import Flask, jsonify, request
 from flask.wrappers import Response
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 from resume_assistant.config import Config, load_config
 from resume_assistant.web.resume_upload import (
@@ -47,11 +49,27 @@ def create_app(config: Config | None = None) -> Flask:
     resolved = config or load_config()
     CORS(app, resources={"/api/*": {"origins": resolved.frontend_origin}})
 
+    # In-memory storage is safe here only because render.yaml runs a single
+    # gunicorn worker; it would silently stop enforcing limits across workers
+    # if this app were ever scaled to more than one process.
+    limiter = Limiter(
+        get_remote_address,
+        app=app,
+        storage_uri="memory://",
+        default_limits=["60 per hour"],
+    )
+
     @app.errorhandler(413)
     def _upload_too_large(_exc: Exception) -> ResponseReturn:
         """A friendly JSON error instead of Flask's default 413 page."""
         message = "That file is larger than the 10 MB limit. Upload a smaller file."
         return jsonify(error=message), 413
+
+    @app.errorhandler(429)
+    def _rate_limited(_exc: Exception) -> ResponseReturn:
+        """A friendly JSON error instead of Flask-Limiter's default 429 page."""
+        message = "Too many requests. Please wait a bit before trying again."
+        return jsonify(error=message), 429
 
     def _read_inputs() -> tuple[str, str] | Response:
         """Parse + validate the resume text and username shared by both endpoints.
@@ -77,6 +95,7 @@ def create_app(config: Config | None = None) -> Flask:
         return resume_text, username
 
     @app.post("/api/analyze")
+    @limiter.limit("10 per hour")
     def analyze() -> ResponseReturn:
         """Validate input, run the analysis, and return the gap report + plan as JSON."""
         parsed = _read_inputs()
@@ -94,6 +113,7 @@ def create_app(config: Config | None = None) -> Flask:
         )
 
     @app.post("/api/analyze/stream")
+    @limiter.limit("10 per hour")
     def analyze_stream() -> ResponseReturn:
         """Same analysis as ``/api/analyze``, but stream real per-stage progress via SSE.
 

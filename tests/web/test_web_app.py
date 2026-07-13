@@ -329,6 +329,23 @@ def test_cors_allows_configured_frontend_origin(
     assert resp.headers.get("Access-Control-Allow-Origin") == FRONTEND_ORIGIN
 
 
+def test_analyze_rate_limit_returns_friendly_429(
+    mocker: MockerFixture, client: FlaskClient, profile_with_repos: Profile
+) -> None:
+    """/api/analyze is capped at 10/hour per IP; the 11th request gets a friendly 429."""
+    outcome = _result(profile_with_repos, False)
+    mocker.patch.object(webapp, "run_analysis", return_value=outcome)
+
+    for _ in range(10):
+        resp = client.post("/api/analyze", data={"resume_text": "x", "username": "octocat"})
+        assert resp.status_code == 200
+
+    resp = client.post("/api/analyze", data={"resume_text": "x", "username": "octocat"})
+
+    assert resp.status_code == 429
+    assert resp.get_json() == {"error": "Too many requests. Please wait a bit before trying again."}
+
+
 def test_cors_rejects_other_origins(
     mocker: MockerFixture, client: FlaskClient, profile_with_repos: Profile
 ) -> None:
