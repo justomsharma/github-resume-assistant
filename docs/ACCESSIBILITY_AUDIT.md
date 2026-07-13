@@ -3,9 +3,20 @@
 > Point-in-time findings for the two closing v2.4 items: "Responsive design pass
 > + Lighthouse score" and "Accessibility audit (axe/Lighthouse a11y pass)".
 > Regenerate the Lighthouse numbers when the frontend changes materially: in
-> `frontend/`, run `npm run build && npm run start` in one terminal, then
-> `npm run audit:lighthouse` in another once it's serving on `:3000`. The axe
-> checks below run on every `npm test`.
+> `frontend/`, run `npm run build && npm run start` in one terminal, then in
+> another, once it's serving on `:3000`, run `npm run audit:lighthouse:desktop`
+> and `npm run audit:lighthouse:mobile` (two separate commands — see below for
+> why). The axe checks below run on every `npm test`.
+>
+> On Windows, each `npx lighthouse` invocation prints an `EPERM` Node stack
+> trace *after* writing its report — chrome-launcher failing to delete its own
+> temp profile dir, which makes the process exit non-zero. The
+> `.report.json`/`.report.html` files are already written by then; it's a
+> harmless post-report cleanup crash. This is also why desktop and mobile are
+> two independent `npm run` scripts rather than one chained command: `npm`
+> scripts run through `cmd.exe` on Windows, where `&&` would skip the mobile
+> run after the desktop run's "failure", and `;` isn't a command separator at
+> all in `cmd.exe` (it gets passed through literally as an argument).
 
 ## Tooling
 

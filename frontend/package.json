@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "audit:lighthouse": "npx lighthouse http://localhost:3000 --output=json --output=html --output-path=./lighthouse-report-desktop --preset=desktop --chrome-flags=\"--headless\" && npx lighthouse http://localhost:3000 --output=json --output=html --output-path=./lighthouse-report-mobile --chrome-flags=\"--headless\""
+    "audit:lighthouse:desktop": "npx lighthouse http://localhost:3000 --output=json --output=html --output-path=./lighthouse-report-desktop --preset=desktop --chrome-flags=\"--headless\"",
+    "audit:lighthouse:mobile": "npx lighthouse http://localhost:3000 --output=json --output=html --output-path=./lighthouse-report-mobile --chrome-flags=\"--headless\""
   },
   "dependencies": {
     "next": "16.2.10",
