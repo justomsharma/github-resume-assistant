@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { axe } from "vitest-axe";
 import type { ErrorKind } from "@/lib/api";
 import ErrorBanner from "./ErrorBanner";
 
@@ -23,5 +24,10 @@ describe("ErrorBanner", () => {
     } else {
       expect(alert.textContent).not.toMatch(/try again/i);
     }
+  });
+
+  it("has no axe violations", async () => {
+    const { container } = render(<ErrorBanner message="Something happened." kind="server_error" />);
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

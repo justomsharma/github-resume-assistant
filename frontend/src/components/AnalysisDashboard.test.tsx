@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { axe } from "vitest-axe";
 import type { AnalysisResponse, GapReport } from "@/lib/types";
 import AnalysisDashboard from "./AnalysisDashboard";
 
@@ -192,5 +193,15 @@ describe("AnalysisDashboard", () => {
       expect(screen.getByText("react-dashboard")).toBeInTheDocument();
       expect(screen.queryByText("Generating your build plan…")).not.toBeInTheDocument();
     });
+  });
+
+  it("has no axe violations for a normal report", async () => {
+    const { container } = render(<AnalysisDashboard result={normalResult} onBackToHome={vi.fn()} />);
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it("has no axe violations for the empty-GitHub case", async () => {
+    const { container } = render(<AnalysisDashboard result={emptyResult} onBackToHome={vi.fn()} />);
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

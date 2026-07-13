@@ -37,6 +37,10 @@ yarn-error.log*
 # vercel
 .vercel
 
+# lighthouse audit reports (regenerate via `npm run audit:lighthouse`; scores
+# are recorded in docs/ACCESSIBILITY_AUDIT.md)
+lighthouse-report*
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

@@ -169,8 +169,8 @@ before scope grows further.
 - ⬜ Grow past 6 components further — a settings/history view
 - ⬜ Real state management story (Zustand/Context, justified by what the new
   views actually need — not added speculatively)
-- ⬜ Responsive design pass + Lighthouse score
-- ⬜ Accessibility audit (axe/Lighthouse a11y pass)
+- ✅ Responsive design pass + Lighthouse score
+- ✅ Accessibility audit (axe/Lighthouse a11y pass)
 
 **Deliverable:** the frontend holds up under real usage — handles slow/failed
 requests and empty state gracefully, works on mobile, and passes an a11y audit.
