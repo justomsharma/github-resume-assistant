@@ -7,13 +7,57 @@ import type { AnalysisResponse, ApiErrorResponse } from "./types";
  */
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:5000";
 
+/** Buckets the backend's HTTP status codes into what the UI should tell the user. */
+export type ErrorKind =
+  | "invalid_input"
+  | "user_not_found"
+  | "too_large"
+  | "rate_limited"
+  | "server_error"
+  | "network";
+
+/**
+ * Maps a response status to an ErrorKind. Mirrors the status codes the Flask
+ * API actually returns (src/resume_assistant/web/{app,service}.py): 400 bad
+ * input, 404 unknown GitHub user, 413 oversized upload, 429 our rate limit,
+ * 503 upstream (GitHub) rate limit, 502 upstream failure. Anything else falls
+ * back to "server_error"; no status at all (fetch never got a response) is
+ * "network".
+ */
+export function errorKindFromStatus(status?: number): ErrorKind {
+  switch (status) {
+    case 400:
+      return "invalid_input";
+    case 404:
+      return "user_not_found";
+    case 413:
+      return "too_large";
+    case 429:
+    case 503:
+      return "rate_limited";
+    case undefined:
+      return "network";
+    default:
+      return "server_error";
+  }
+}
+
+/** The shape LandingForm/page.tsx pass around for a user-facing failure. */
+export interface AppError {
+  message: string;
+  kind: ErrorKind;
+}
+
 export class AnalysisRequestError extends Error {
+  public readonly kind: ErrorKind;
+
   constructor(
     message: string,
     public readonly status: number,
   ) {
     super(message);
     this.name = "AnalysisRequestError";
+    this.kind = errorKindFromStatus(status);
   }
 }
 
@@ -61,32 +105,45 @@ export async function analyze(
 }
 
 /**
+ * Callbacks for {@link analyzeWithProgress}. ``onProgress`` receives a 0..1
+ * fraction (the caller should set it to 1 once the promise resolves so the
+ * ring snaps to 100%). ``onSubProgress`` and ``onReportReady`` are optional
+ * because the time-based fallback (no SSE) can't produce them.
+ */
+export interface AnalysisStreamCallbacks {
+  onProgress: (fraction: number) => void;
+  onSubProgress?: (detail: string) => void;
+  onReportReady?: (report: AnalysisResponse["report"]) => void;
+}
+
+/**
  * Run the analysis with real progress. Prefers the SSE stream endpoint (which
- * reports each real pipeline stage); if streaming is unavailable on the host it
- * transparently falls back to the single-shot analyze() with a time-based
- * estimate. onProgress receives a 0..1 fraction. The caller should set the
- * fraction to 1 once this resolves so the ring snaps to 100%.
+ * reports each real pipeline stage, finer-grained sub-progress within the
+ * slow ``evidence``/``report`` stages, and the gap report as soon as it's
+ * ready); if streaming is unavailable on the host it transparently falls back
+ * to the single-shot analyze() with a time-based estimate (no sub-progress or
+ * early report in that case).
  */
 export async function analyzeWithProgress(
   file: File,
   username: string,
-  onProgress: (fraction: number) => void,
+  callbacks: AnalysisStreamCallbacks,
   signal?: AbortSignal,
 ): Promise<AnalysisResponse> {
   try {
-    return await analyzeStream(file, username, onProgress, signal);
+    return await analyzeStream(file, username, callbacks, signal);
   } catch (err) {
     if (!(err instanceof StreamUnavailableError)) throw err;
     // Streaming blocked/buffered by the host — fall back without failing the page.
   }
-  return analyzeWithTimeFill(file, username, onProgress, signal);
+  return analyzeWithTimeFill(file, username, callbacks.onProgress, signal);
 }
 
 /** POST to the SSE endpoint and parse real per-stage progress events. */
 async function analyzeStream(
   file: File,
   username: string,
-  onProgress: (fraction: number) => void,
+  { onProgress, onSubProgress, onReportReady }: AnalysisStreamCallbacks,
   signal?: AbortSignal,
 ): Promise<AnalysisResponse> {
   const formData = new FormData();
@@ -141,6 +198,10 @@ async function analyzeStream(
       const payload = JSON.parse(dataLine.slice(5).trim()) as StreamPayload;
       if (payload.type === "progress") {
         onProgress(payload.index / payload.total);
+      } else if (payload.type === "subprogress") {
+        onSubProgress?.(payload.detail);
+      } else if (payload.type === "report") {
+        onReportReady?.(payload.report);
       } else if (payload.type === "result") {
         result = { report: payload.report, plan: payload.plan };
       } else if (payload.type === "error") {
@@ -182,5 +243,7 @@ async function analyzeWithTimeFill(
 /** The shape of each SSE `data:` payload from /api/analyze/stream. */
 type StreamPayload =
   | { type: "progress"; stage: string; index: number; total: number; label: string }
+  | { type: "subprogress"; stage: string; detail: string }
+  | { type: "report"; report: AnalysisResponse["report"] }
   | { type: "result"; report: AnalysisResponse["report"]; plan: AnalysisResponse["plan"] }
   | { type: "error"; error: string };

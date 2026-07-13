@@ -63,6 +63,30 @@ describe("AnalysisProgress", () => {
     );
   });
 
+  it("shows the sub-progress detail under the active step when provided", async () => {
+    stubReducedMotion();
+    render(
+      <AnalysisProgress
+        handle="@octocat"
+        progress={0.5}
+        detail="Reading repo 3 of 10"
+        onCancel={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      const activeStep = screen.getByText("Extracting Skills & Experience").closest(".pstep");
+      expect(activeStep).toHaveClass("pstep-now");
+      expect(activeStep).toHaveTextContent("Reading repo 3 of 10");
+    });
+  });
+
+  it("renders no extra detail line when detail is omitted", () => {
+    render(<AnalysisProgress handle="@octocat" progress={0.5} onCancel={vi.fn()} />);
+
+    expect(document.querySelector(".pstep-detail")).not.toBeInTheDocument();
+  });
+
   it("calls onCancel when Cancel Analysis is clicked", async () => {
     const user = userEvent.setup();
     const onCancel = vi.fn();

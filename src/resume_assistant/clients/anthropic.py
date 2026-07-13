@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from typing import Any
 
 import anthropic
@@ -329,7 +330,10 @@ class AnthropicClient:
         return _parse_suggestions(_response_text(response))
 
     def verify_claims(
-        self, claims: list[Claim], evidence: list[RepoEvidence]
+        self,
+        claims: list[Claim],
+        evidence: list[RepoEvidence],
+        on_batch_done: Callable[[int, int], None] | None = None,
     ) -> list[ClaimEvidence]:
         """Grade each claim against real repo evidence, returning one verdict per claim.
 
@@ -337,6 +341,10 @@ class AnthropicClient:
         char budget; each batch grades every claim, and the verdicts are merged
         (``backed`` in any batch wins). Returns claims in their original order.
         Raises ``AnthropicError`` on API failure or an unparseable response.
+
+        ``on_batch_done``, if given, fires after each batch finishes with
+        ``(completed_count, total_batch_count)`` — lets the caller show real
+        progress through what's otherwise a silent, potentially multi-call stage.
         """
         if not claims:
             return []
@@ -344,7 +352,11 @@ class AnthropicClient:
             return [_default_verdict(claim) for claim in claims]
 
         batches = _batch_evidence(evidence)
-        per_batch = [self._verify_one_batch(claims, batch) for batch in batches]
+        per_batch = []
+        for index, batch in enumerate(batches):
+            per_batch.append(self._verify_one_batch(claims, batch))
+            if on_batch_done is not None:
+                on_batch_done(index + 1, len(batches))
         return _merge_verdicts(claims, per_batch)
 
     def _verify_one_batch(

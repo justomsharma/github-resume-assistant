@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import sqlite3
+from collections.abc import Callable
 from contextlib import closing
 from typing import Protocol
 
@@ -150,7 +151,11 @@ class CachingSuggestionGenerator:
 class RepoEvidenceFetcherProtocol(Protocol):
     """Structural stand-in: anything that fetches code-level evidence for a profile."""
 
-    def fetch_repo_evidence(self, profile: Profile) -> list[RepoEvidence]: ...
+    def fetch_repo_evidence(
+        self,
+        profile: Profile,
+        on_repo_done: Callable[[int, int], None] | None = None,
+    ) -> list[RepoEvidence]: ...
 
 
 class CachingRepoEvidenceFetcher:
@@ -167,14 +172,22 @@ class CachingRepoEvidenceFetcher:
         self._inner = inner
         self._cache = cache
 
-    def fetch_repo_evidence(self, profile: Profile) -> list[RepoEvidence]:
-        """Return cached evidence for this profile's repos, or fetch and cache it."""
+    def fetch_repo_evidence(
+        self,
+        profile: Profile,
+        on_repo_done: Callable[[int, int], None] | None = None,
+    ) -> list[RepoEvidence]:
+        """Return cached evidence for this profile's repos, or fetch and cache it.
+
+        ``on_repo_done`` is only invoked on a cache miss — a cache hit has no
+        per-repo work to report progress on.
+        """
         key = self._key(profile)
         cached = self._cache.get(key)
         if cached is not None:
             return _deserialize_evidence(cached)
 
-        evidence = self._inner.fetch_repo_evidence(profile)
+        evidence = self._inner.fetch_repo_evidence(profile, on_repo_done)
         self._cache.set(key, _serialize_evidence(evidence))
         return evidence
 
@@ -195,7 +208,10 @@ class ClaimVerifierProtocol(Protocol):
     """Structural stand-in: anything that grades claims against repo evidence."""
 
     def verify_claims(
-        self, claims: list[Claim], evidence: list[RepoEvidence]
+        self,
+        claims: list[Claim],
+        evidence: list[RepoEvidence],
+        on_batch_done: Callable[[int, int], None] | None = None,
     ) -> list[ClaimEvidence]: ...
 
 
@@ -214,15 +230,22 @@ class CachingClaimVerifier:
         self._model = model
 
     def verify_claims(
-        self, claims: list[Claim], evidence: list[RepoEvidence]
+        self,
+        claims: list[Claim],
+        evidence: list[RepoEvidence],
+        on_batch_done: Callable[[int, int], None] | None = None,
     ) -> list[ClaimEvidence]:
-        """Return cached verdicts for these claims + evidence, or verify and cache them."""
+        """Return cached verdicts for these claims + evidence, or verify and cache them.
+
+        ``on_batch_done`` is only invoked on a cache miss — a cache hit has no
+        per-batch work to report progress on.
+        """
         key = self._key(claims, evidence)
         cached = self._cache.get(key)
         if cached is not None:
             return _deserialize_claim_evidence(cached)
 
-        verdicts = self._inner.verify_claims(claims, evidence)
+        verdicts = self._inner.verify_claims(claims, evidence, on_batch_done)
         self._cache.set(key, _serialize_claim_evidence(verdicts))
         return verdicts
 

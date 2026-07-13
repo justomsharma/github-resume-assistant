@@ -12,14 +12,18 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import logging
 import re
 import time
 import tomllib
+from collections.abc import Callable
 from typing import Any
 
 import requests
 
 from resume_assistant.core.models import Profile, Repo, RepoEvidence
+
+logger = logging.getLogger(__name__)
 
 _API_ROOT = "https://api.github.com"
 _PER_PAGE = 100  # GitHub caps page size at 100.
@@ -100,7 +104,11 @@ class GitHubClient:
         repos = self._fetch_all_repos(username)
         return _to_profile(user, repos)
 
-    def fetch_repo_evidence(self, profile: Profile) -> list[RepoEvidence]:
+    def fetch_repo_evidence(
+        self,
+        profile: Profile,
+        on_repo_done: Callable[[int, int], None] | None = None,
+    ) -> list[RepoEvidence]:
         """Fetch code-level facts for each of a profile's non-fork public repos.
 
         For every non-fork repo (no cap) this reads the recursive file tree, the
@@ -109,12 +117,18 @@ class GitHubClient:
         (they aren't evidence of the person's own work). Each repo needs several
         API calls, so an unauthenticated caller with many repos can exhaust the
         rate limit; that surfaces as ``RateLimitError`` (docs/README note).
+
+        ``on_repo_done``, if given, fires after each repo finishes with
+        ``(completed_count, total_count)`` — lets the caller show real progress
+        through what's otherwise the slowest stage of a full analysis.
         """
-        return [
-            self._fetch_one_repo_evidence(profile.login, repo)
-            for repo in profile.repos
-            if not repo.is_fork
-        ]
+        repos = [repo for repo in profile.repos if not repo.is_fork]
+        evidence = []
+        for index, repo in enumerate(repos):
+            evidence.append(self._fetch_one_repo_evidence(profile.login, repo))
+            if on_repo_done is not None:
+                on_repo_done(index + 1, len(repos))
+        return evidence
 
     def _fetch_one_repo_evidence(self, owner: str, repo: Repo) -> RepoEvidence:
         """Assemble one repo's code-level evidence from tree, manifests, languages, README."""
@@ -227,7 +241,16 @@ class GitHubClient:
                 response = self._session.get(url, params=params, timeout=_TIMEOUT_SECONDS)
             except requests.RequestException as exc:
                 last_exc = exc
-                time.sleep(_BACKOFF_BASE_SECONDS * 2**attempt)
+                delay = _BACKOFF_BASE_SECONDS * 2**attempt
+                logger.warning(
+                    "GitHub request error on attempt %d/%d for %s: %r — retrying in %.1fs",
+                    attempt + 1,
+                    _MAX_RETRIES,
+                    url,
+                    exc,
+                    delay,
+                )
+                time.sleep(delay)
                 continue
 
             if response.status_code == 404:
@@ -239,20 +262,41 @@ class GitHubClient:
                 # out and retrying; a long or primary limit is surfaced as an error.
                 retry_after = _retry_after_seconds(response)
                 if retry_after is not None and retry_after <= _MAX_RETRY_AFTER_SECONDS:
+                    logger.warning(
+                        "GitHub rate limit hit for %s — waiting %ds before retrying",
+                        url,
+                        retry_after,
+                    )
                     time.sleep(retry_after)
                     continue
+                logger.warning(
+                    "GitHub rate limit exhausted for %s (retry_after=%s)", url, retry_after
+                )
                 raise RateLimitError(_rate_limit_message(response, retry_after))
             if response.status_code >= 500:
                 # Transient server error — retry with backoff.
-                time.sleep(_BACKOFF_BASE_SECONDS * 2**attempt)
+                delay = _BACKOFF_BASE_SECONDS * 2**attempt
+                logger.warning(
+                    "GitHub server error %d on attempt %d/%d for %s — retrying in %.1fs",
+                    response.status_code,
+                    attempt + 1,
+                    _MAX_RETRIES,
+                    url,
+                    delay,
+                )
+                time.sleep(delay)
                 continue
             if not response.ok:
                 raise GitHubError(f"GitHub request failed ({response.status_code}): {url}")
             return response.json()
 
         if last_exc is not None:
+            logger.error(
+                "GitHub request failed after %d retries for %s: %r", _MAX_RETRIES, url, last_exc
+            )
             raise GitHubError(f"GitHub request failed after retries: {url}") from last_exc
         # Retries exhausted while backing off a short secondary rate limit or 5xx.
+        logger.error("GitHub request failed after %d retries for %s", _MAX_RETRIES, url)
         raise GitHubError(f"GitHub request failed after {_MAX_RETRIES} retries: {url}")
 
 

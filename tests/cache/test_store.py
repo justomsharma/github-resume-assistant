@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from resume_assistant.cache.store import (
@@ -192,8 +193,14 @@ class CountingFetcher:
         self._evidence = evidence
         self.calls = 0
 
-    def fetch_repo_evidence(self, profile: Profile) -> list[RepoEvidence]:
+    def fetch_repo_evidence(
+        self,
+        profile: Profile,
+        on_repo_done: Callable[[int, int], None] | None = None,
+    ) -> list[RepoEvidence]:
         self.calls += 1
+        if on_repo_done is not None:
+            on_repo_done(1, 1)
         return self._evidence
 
 
@@ -209,6 +216,22 @@ def test_caching_fetcher_second_call_hits_cache(tmp_path: Path) -> None:
     assert first == second
     assert second[0].repo_name == "go-cache"
     assert second[0].dependencies == ("dep-a",)
+
+
+def test_caching_fetcher_forwards_callback_on_miss_not_on_hit(tmp_path: Path) -> None:
+    profile = _profile_with([_repo("go-cache", "2024-06-01T00:00:00Z")])
+    inner = CountingFetcher([_evidence("go-cache", "2024-06-01T00:00:00Z")])
+    fetcher = CachingRepoEvidenceFetcher(inner, _cache(tmp_path))
+    calls: list[tuple[int, int]] = []
+
+    def on_done(done: int, total: int) -> None:
+        calls.append((done, total))
+
+    fetcher.fetch_repo_evidence(profile, on_repo_done=on_done)
+    assert calls == [(1, 1)]  # cache miss → forwarded to the inner fetcher
+
+    fetcher.fetch_repo_evidence(profile, on_repo_done=on_done)
+    assert calls == [(1, 1)]  # cache hit → nothing to report, callback not invoked
 
 
 def test_caching_fetcher_rekeys_when_a_repo_is_pushed(tmp_path: Path) -> None:
@@ -243,9 +266,14 @@ class CountingVerifier:
         self.calls = 0
 
     def verify_claims(
-        self, claims: list[Claim], evidence: list[RepoEvidence]
+        self,
+        claims: list[Claim],
+        evidence: list[RepoEvidence],
+        on_batch_done: Callable[[int, int], None] | None = None,
     ) -> list[ClaimEvidence]:
         self.calls += 1
+        if on_batch_done is not None:
+            on_batch_done(1, 1)
         return self._verdicts
 
 
@@ -262,6 +290,23 @@ def test_caching_verifier_second_call_hits_cache(tmp_path: Path) -> None:
     assert first == second
     assert second[0].verdict == "backed"
     assert second[0].cited_files == ("go-cache/src/main.go",)
+
+
+def test_caching_verifier_forwards_callback_on_miss_not_on_hit(tmp_path: Path) -> None:
+    claims = [Claim(text="Built a cache in Go", skills=("go",))]
+    evidence = [_evidence("go-cache", "2024-06-01T00:00:00Z")]
+    inner = CountingVerifier([_verdict("Built a cache in Go")])
+    verifier = CachingClaimVerifier(inner, _cache(tmp_path), model="claude-sonnet-5")
+    calls: list[tuple[int, int]] = []
+
+    def on_done(done: int, total: int) -> None:
+        calls.append((done, total))
+
+    verifier.verify_claims(claims, evidence, on_batch_done=on_done)
+    assert calls == [(1, 1)]  # cache miss → forwarded to the inner verifier
+
+    verifier.verify_claims(claims, evidence, on_batch_done=on_done)
+    assert calls == [(1, 1)]  # cache hit → nothing to report, callback not invoked
 
 
 def test_caching_verifier_rekeys_when_evidence_changes(tmp_path: Path) -> None:

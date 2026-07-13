@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import type { AnalysisResponse } from "@/lib/types";
+import type { AnalysisResponse, GapReport, ProjectPlan } from "@/lib/types";
 import { totalClaims } from "@/lib/types";
 import { deriveDashboardStats } from "@/lib/deriveStats";
 import { buildReportMarkdown, buildShareSummary } from "@/lib/reportText";
 import DashboardSidebar from "./DashboardSidebar";
+import EmptyState from "./EmptyState";
 
 type Tab = "overview" | "skills" | "experience" | "projects" | "recommendations";
 
@@ -88,7 +89,7 @@ export default function AnalysisDashboard({
   result,
   onBackToHome,
 }: {
-  result: AnalysisResponse;
+  result: { report: GapReport; plan: ProjectPlan | null };
   onBackToHome: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("overview");
@@ -96,10 +97,11 @@ export default function AnalysisDashboard({
   const { report, plan } = result;
   const stats = deriveDashboardStats(result);
   const total = totalClaims(report);
-  const topSuggestion = plan.suggestions[0];
+  const topSuggestion = plan?.suggestions[0];
 
   function handleDownload() {
-    const markdown = buildReportMarkdown(result);
+    if (!plan) return;
+    const markdown = buildReportMarkdown({ report, plan });
     const blob = new Blob([markdown], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -110,7 +112,8 @@ export default function AnalysisDashboard({
   }
 
   async function handleShare() {
-    await navigator.clipboard.writeText(buildShareSummary(result));
+    if (!plan) return;
+    await navigator.clipboard.writeText(buildShareSummary({ report, plan }));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
@@ -130,10 +133,22 @@ export default function AnalysisDashboard({
               <p className="dsub">Here&rsquo;s your personalized analysis report.</p>
             </div>
             <div className="dtop-actions">
-              <button type="button" className="dbtn dbtn-ghost" onClick={handleDownload}>
+              <button
+                type="button"
+                className="dbtn dbtn-ghost"
+                onClick={handleDownload}
+                disabled={!plan}
+                title={plan ? undefined : "Still generating your build plan…"}
+              >
                 ⬇ Download Report
               </button>
-              <button type="button" className="dbtn dbtn-primary" onClick={handleShare}>
+              <button
+                type="button"
+                className="dbtn dbtn-primary"
+                onClick={handleShare}
+                disabled={!plan}
+                title={plan ? undefined : "Still generating your build plan…"}
+              >
                 {copied ? "✓ Copied!" : "⇄ Share Report"}
               </button>
             </div>
@@ -205,7 +220,11 @@ export default function AnalysisDashboard({
                       by public GitHub evidence
                     </li>
                     <li>✓ {stats.totalSkills} distinct skills named across your claims</li>
-                    <li>✓ {plan.suggestions.length} build-plan project{plan.suggestions.length === 1 ? "" : "s"} suggested</li>
+                    <li>
+                      {plan
+                        ? `✓ ${plan.suggestions.length} build-plan project${plan.suggestions.length === 1 ? "" : "s"} suggested`
+                        : "⏳ Build-plan projects still generating…"}
+                    </li>
                   </ul>
                 </div>
                 <div className="dpanel">
@@ -255,9 +274,23 @@ export default function AnalysisDashboard({
           {tab === "skills" && (
             <div className="dpanel">
               <div className="dpanel-h">All Claims by Verdict</div>
-              <ClaimList title="Backed by GitHub" evidences={report.backed} tone="ok" />
-              <ClaimList title="Not shown yet" evidences={report.not_shown} tone="gap" />
-              <ClaimList title="Not verifiable from public code" evidences={report.not_verifiable} tone="na" />
+              {total === 0 ? (
+                <EmptyState
+                  icon="◫"
+                  title="No claims to show yet"
+                  description="Add specific projects, technologies, and outcomes to your resume, then run this again."
+                />
+              ) : (
+                <>
+                  <ClaimList title="Backed by GitHub" evidences={report.backed} tone="ok" />
+                  <ClaimList title="Not shown yet" evidences={report.not_shown} tone="gap" />
+                  <ClaimList
+                    title="Not verifiable from public code"
+                    evidences={report.not_verifiable}
+                    tone="na"
+                  />
+                </>
+              )}
             </div>
           )}
 
@@ -280,9 +313,31 @@ export default function AnalysisDashboard({
             </div>
           )}
 
-          {tab === "projects" && <SuggestionList suggestions={plan.suggestions} />}
+          {tab === "projects" &&
+            (plan ? (
+              <SuggestionList suggestions={plan.suggestions} />
+            ) : (
+              <div className="dpanel">
+                <EmptyState
+                  icon="⏳"
+                  title="Generating your build plan…"
+                  description="We're still ranking project suggestions against your gap report. This tab fills in automatically once it's ready."
+                />
+              </div>
+            ))}
 
-          {tab === "recommendations" && <SuggestionList suggestions={plan.suggestions} detailed />}
+          {tab === "recommendations" &&
+            (plan ? (
+              <SuggestionList suggestions={plan.suggestions} detailed />
+            ) : (
+              <div className="dpanel">
+                <EmptyState
+                  icon="⏳"
+                  title="Generating your build plan…"
+                  description="We're still ranking project suggestions against your gap report. This tab fills in automatically once it's ready."
+                />
+              </div>
+            ))}
         </main>
       </div>
     </div>
@@ -338,10 +393,11 @@ function SuggestionList({
   if (suggestions.length === 0) {
     return (
       <div className="dpanel">
-        <p className="dmuted">
-          No concrete, verifiable claims were found to ground suggestions on. Add specific
-          projects, technologies, and outcomes to your resume, then run this again.
-        </p>
+        <EmptyState
+          icon="◇"
+          title="No suggestions yet"
+          description="No concrete, verifiable claims were found to ground suggestions on. Add specific projects, technologies, and outcomes to your resume, then run this again."
+        />
       </div>
     );
   }

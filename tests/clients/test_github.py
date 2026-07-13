@@ -351,6 +351,32 @@ def test_fetch_repo_evidence_missing_readme_and_manifests() -> None:
 
 
 @responses.activate
+def test_fetch_repo_evidence_reports_progress_per_repo() -> None:
+    """``on_repo_done`` fires once per non-fork repo, in order, with the running count."""
+    _register_evidence("one", tree=[{"type": "blob", "path": "a.py"}], languages={"Python": 1})
+    _register_evidence("two", tree=[{"type": "blob", "path": "b.py"}], languages={"Python": 1})
+
+    calls: list[tuple[int, int]] = []
+    evidence = GitHubClient().fetch_repo_evidence(
+        _profile([_repo("one"), _repo("two"), _repo("a-fork", is_fork=True)]),
+        on_repo_done=lambda done, total: calls.append((done, total)),
+    )
+
+    assert len(evidence) == 2  # the fork is skipped, and doesn't count toward the total
+    assert calls == [(1, 2), (2, 2)]
+
+
+@responses.activate
+def test_fetch_repo_evidence_without_callback_is_unaffected() -> None:
+    """Omitting ``on_repo_done`` (the default) still fetches evidence normally."""
+    _register_evidence("solo", tree=[{"type": "blob", "path": "a.py"}], languages={"Python": 1})
+
+    evidence = GitHubClient().fetch_repo_evidence(_profile([_repo("solo")]))
+
+    assert [e.repo_name for e in evidence] == ["solo"]
+
+
+@responses.activate
 def test_fetch_repo_evidence_empty_repo_tree_missing() -> None:
     base = f"{_API}/repos/octocat/empty"
     responses.add(responses.GET, f"{base}/git/trees/main", json={"message": "empty"}, status=404)

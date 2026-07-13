@@ -1,9 +1,11 @@
 "use client";
 
 import { useRef, useState, type DragEvent, type FormEvent } from "react";
+import type { AppError } from "@/lib/api";
+import ErrorBanner from "./ErrorBanner";
 
 interface LandingFormProps {
-  error: string | null;
+  error: AppError | null;
   submitting: boolean;
   onSubmit: (file: File, username: string) => void;
 }
@@ -30,11 +32,7 @@ export default function LandingForm({ error, submitting, onSubmit }: LandingForm
 
   return (
     <>
-      {error && (
-        <div className="alert" role="alert">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner message={error.message} kind={error.kind} />}
 
       <form className="board" onSubmit={handleSubmit} encType="multipart/form-data">
         <div className="cards">

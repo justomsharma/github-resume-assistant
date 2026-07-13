@@ -2,7 +2,8 @@
 
 import { useRef, useState } from "react";
 import { analyzeWithProgress, AnalysisRequestError } from "@/lib/api";
-import type { AnalysisResponse } from "@/lib/types";
+import type { AppError } from "@/lib/api";
+import type { AnalysisResponse, GapReport } from "@/lib/types";
 import Sidebar from "@/components/Sidebar";
 import DashboardSidebar from "@/components/DashboardSidebar";
 import LandingForm from "@/components/LandingForm";
@@ -12,23 +13,55 @@ import ThemeToggle from "@/components/ThemeToggle";
 
 type Screen = "landing" | "loading" | "results";
 
+/** While the plan is still generating, the dashboard renders with `plan: null`. */
+interface PartialResult {
+  report: GapReport;
+  plan: AnalysisResponse["plan"] | null;
+}
+
 export default function Home() {
   const [screen, setScreen] = useState<Screen>("landing");
   const [handle, setHandle] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<AnalysisResponse | null>(null);
+  const [error, setError] = useState<AppError | null>(null);
+  const [result, setResult] = useState<PartialResult | null>(null);
   const [progress, setProgress] = useState(0);
+  const [detail, setDetail] = useState<string | undefined>(undefined);
   const controllerRef = useRef<AbortController | null>(null);
 
   async function handleSubmit(file: File, username: string) {
     setError(null);
     setHandle(username);
     setProgress(0);
+    setDetail(undefined);
+    setResult(null);
     setScreen("loading");
     const controller = new AbortController();
     controllerRef.current = controller;
+    // Guards against a stale run's callbacks firing after the user has already
+    // cancelled or started a new analysis (the fetch/stream keeps running in the
+    // background until the promise settles, even once we've moved on from it).
+    const isStale = () => controllerRef.current !== controller;
+
     try {
-      const response = await analyzeWithProgress(file, username, setProgress, controller.signal);
+      const response = await analyzeWithProgress(
+        file,
+        username,
+        {
+          onProgress: (fraction) => {
+            if (!isStale()) setProgress(fraction);
+          },
+          onSubProgress: (text) => {
+            if (!isStale()) setDetail(text);
+          },
+          onReportReady: (report) => {
+            if (isStale()) return;
+            setResult({ report, plan: null });
+            setScreen("results");
+          },
+        },
+        controller.signal,
+      );
+      if (isStale()) return;
       setProgress(1);
       setResult(response);
       setScreen("results");
@@ -38,9 +71,12 @@ export default function Home() {
         setScreen("landing");
         return;
       }
-      const message =
-        err instanceof AnalysisRequestError ? err.message : "Something went wrong. Try again.";
-      setError(message);
+      if (isStale()) return;
+      setError(
+        err instanceof AnalysisRequestError
+          ? { message: err.message, kind: err.kind }
+          : { message: "Something went wrong. Try again.", kind: "network" },
+      );
       setScreen("landing");
     }
   }
@@ -73,6 +109,7 @@ export default function Home() {
             <AnalysisProgress
               handle={handle ? `@${handle}` : "your"}
               progress={progress}
+              detail={detail}
               onCancel={cancelAnalysis}
             />
           </main>

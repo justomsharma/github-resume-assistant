@@ -7,6 +7,8 @@ assert the bucketing, plus the empty-GitHub short-circuit (verifier never called
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from resume_assistant.core.analysis import build_gap_report
 from resume_assistant.core.models import Claim, ClaimEvidence, Profile, RepoEvidence, Verdict
 
@@ -31,7 +33,10 @@ class FakeVerifier:
         self.seen_evidence: list[RepoEvidence] = []
 
     def verify_claims(
-        self, claims: list[Claim], evidence: list[RepoEvidence]
+        self,
+        claims: list[Claim],
+        evidence: list[RepoEvidence],
+        on_batch_done: Callable[[int, int], None] | None = None,
     ) -> list[ClaimEvidence]:
         self.calls += 1
         self.seen_claims = claims

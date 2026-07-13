@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { AnalysisResponse } from "@/lib/types";
+import type { AnalysisResponse, GapReport } from "@/lib/types";
 import AnalysisDashboard from "./AnalysisDashboard";
 
 const normalResult: AnalysisResponse = {
@@ -87,6 +87,15 @@ describe("AnalysisDashboard", () => {
     expect(screen.queryByText("✦ AI Recommendation")).not.toBeInTheDocument();
   });
 
+  it("shows an EmptyState in the Skills tab instead of a blank panel when there are no claims", async () => {
+    const user = userEvent.setup();
+    render(<AnalysisDashboard result={emptyResult} onBackToHome={vi.fn()} />);
+
+    await user.click(screen.getByRole("tab", { name: /Skills/ }));
+    expect(screen.getByText("No claims to show yet")).toBeInTheDocument();
+    expect(screen.queryByText("Backed by GitHub")).not.toBeInTheDocument();
+  });
+
   it("switches tab content on click", async () => {
     const user = userEvent.setup();
     render(<AnalysisDashboard result={normalResult} onBackToHome={vi.fn()} />);
@@ -146,5 +155,42 @@ describe("AnalysisDashboard", () => {
     expect(await screen.findByText("✓ Copied!")).toBeInTheDocument();
 
     vi.unstubAllGlobals();
+  });
+
+  describe("with plan still generating (report arrived first)", () => {
+    const pendingReport: GapReport = normalResult.report;
+
+    it("shows a generating state in Projects/Recommendations and disables report actions", async () => {
+      const user = userEvent.setup();
+      render(
+        <AnalysisDashboard result={{ report: pendingReport, plan: null }} onBackToHome={vi.fn()} />,
+      );
+
+      // Overview renders fine from the report alone, with no recommendation banner yet.
+      expect(screen.getByText("Analysis Complete! 🎉")).toBeInTheDocument();
+      expect(screen.queryByText("✦ AI Recommendation")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Download Report/ })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /Share Report/ })).toBeDisabled();
+
+      await user.click(screen.getByRole("tab", { name: /Projects/ }));
+      expect(screen.getByText("Generating your build plan…")).toBeInTheDocument();
+
+      await user.click(screen.getByRole("tab", { name: /Recommendations/ }));
+      expect(screen.getByText("Generating your build plan…")).toBeInTheDocument();
+    });
+
+    it("fills in the suggestions once the plan arrives (rerender with a populated plan)", async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(
+        <AnalysisDashboard result={{ report: pendingReport, plan: null }} onBackToHome={vi.fn()} />,
+      );
+
+      rerender(<AnalysisDashboard result={normalResult} onBackToHome={vi.fn()} />);
+
+      expect(screen.getByRole("button", { name: /Download Report/ })).toBeEnabled();
+      await user.click(screen.getByRole("tab", { name: /Projects/ }));
+      expect(screen.getByText("react-dashboard")).toBeInTheDocument();
+      expect(screen.queryByText("Generating your build plan…")).not.toBeInTheDocument();
+    });
   });
 });

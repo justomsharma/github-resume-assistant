@@ -30,7 +30,13 @@ describe("LandingForm", () => {
   });
 
   it("shows the error alert when one is provided", () => {
-    render(<LandingForm error="Something went wrong." submitting={false} onSubmit={vi.fn()} />);
+    render(
+      <LandingForm
+        error={{ message: "Something went wrong.", kind: "server_error" }}
+        submitting={false}
+        onSubmit={vi.fn()}
+      />,
+    );
     expect(screen.getByRole("alert")).toHaveTextContent("Something went wrong.");
   });
 });
