@@ -114,4 +114,37 @@ describe("AnalysisDashboard", () => {
     await user.click(screen.getByText("← Back to Home"));
     expect(onBackToHome).toHaveBeenCalledOnce();
   });
+
+  it("downloads a Markdown report when Download Report is clicked", async () => {
+    const user = userEvent.setup();
+    const createObjectURL = vi.fn(() => "blob:mock-url");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    render(<AnalysisDashboard result={normalResult} onBackToHome={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /Download Report/ }));
+
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(clickSpy).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock-url");
+
+    clickSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it("copies a share summary to the clipboard and shows 'Copied!' when Share Report is clicked", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+
+    render(<AnalysisDashboard result={normalResult} onBackToHome={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /Share Report/ }));
+
+    expect(writeText).toHaveBeenCalledOnce();
+    expect(writeText.mock.calls[0][0]).toContain("octocat");
+    expect(await screen.findByText("✓ Copied!")).toBeInTheDocument();
+
+    vi.unstubAllGlobals();
+  });
 });
