@@ -157,6 +157,57 @@ TypeScript frontend and a JSON API, deployable as two free-tier services.
 
 ---
 
+## v2.4 — Frontend maturity pass
+
+**Goal:** the v2.3 frontend proved the API split works but is still a thin,
+two-screen app. Grow it into something that reads as a real product surface
+before scope grows further.
+
+- ⬜ Grow past 6 components — add loading/error states, empty states, and a
+  settings/history view
+- ⬜ Real state management story (Zustand/Context, justified by what the new
+  views actually need — not added speculatively)
+- ⬜ Responsive design pass + Lighthouse score
+- ⬜ Accessibility audit (axe/Lighthouse a11y pass)
+
+**Deliverable:** the frontend holds up under real usage — handles slow/failed
+requests and empty state gracefully, works on mobile, and passes an a11y audit.
+
+---
+
+## v2.5 — Perceived performance: granular progress + progressive results
+
+**Goal:** analyzing a large GitHub account (many repos) can take well over a
+minute, and today the loading screen looks frozen through most of it — the
+5 stages are reported as evenly-weighted, but `evidence` (fetch code-level
+facts per non-fork repo) and `report` (grade claims against evidence, already
+batched under a char budget) dominate wall-clock time with zero visibility
+into progress until each stage's blocking call returns everything at once.
+
+- ⬜ Granular sub-progress: `clients/github.py`'s `fetch_repo_evidence` and
+  `clients/anthropic.py`'s `verify_claims` accept an optional progress
+  callback, firing per repo / per verification batch respectively
+  (`core/analysis.py`'s `ClaimVerifier` protocol gains the optional param)
+- ⬜ SSE carries the sub-progress detail (e.g. "Reading repo 14 of 52") so
+  `AnalysisProgress.tsx` shows real, continuously-moving progress instead of
+  sitting still on one of the two heavy stages
+- ⬜ Progressive reveal: `run_analysis_events` yields the gap report as its
+  own event as soon as it's ready, then the plan afterward, instead of one
+  bundled terminal result — the frontend switches to `AnalysisDashboard` the
+  moment the report lands (Overview/Skills populated), while
+  Projects/Recommendations show a "Generating your build plan…" state until
+  the plan event arrives
+- ⬜ Explicitly out of scope for this version: claim-by-claim streaming inside
+  the report itself — would require restructuring the caching layer
+  (`cache/store.py` currently caches only complete result lists) for
+  uncertain extra benefit on top of the two items above
+
+**Deliverable:** on a large GitHub account, the loading screen shows real,
+continuously-updating progress through the slow stages, and the gap report is
+visible before the 30-day plan finishes generating.
+
+---
+
 ## v3.0+ — Ideas parking lot (not committed)
 
 Only promote these to a real version if a user actually asks for them:

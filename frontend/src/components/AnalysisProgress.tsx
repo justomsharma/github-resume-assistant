@@ -49,10 +49,12 @@ const STEPS: Step[] = [
 export default function AnalysisProgress({
   handle,
   progress,
+  detail,
   onCancel,
 }: {
   handle: string;
   progress: number;
+  detail?: string;
   onCancel: () => void;
 }) {
   const [display, setDisplay] = useState(0);
@@ -118,6 +120,7 @@ export default function AnalysisProgress({
               <div className="pstep-body">
                 <div className="pstep-t">{step.title}</div>
                 <div className="pstep-d">{step.description}</div>
+                {state === "now" && detail && <div className="pstep-detail">{detail}</div>}
               </div>
               <span className="pstep-meta">
                 {state === "pending" ? "Pending" : `${stepPct}%`}

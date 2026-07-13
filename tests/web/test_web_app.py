@@ -20,7 +20,13 @@ from resume_assistant.core.models import (
 )
 from resume_assistant.web import app as webapp
 from resume_assistant.web.resume_upload import ResumeUploadError
-from resume_assistant.web.service import AnalysisError, AnalysisResult, ProgressEvent
+from resume_assistant.web.service import (
+    AnalysisError,
+    AnalysisResult,
+    ProgressEvent,
+    ReportReady,
+    SubProgressEvent,
+)
 
 FRONTEND_ORIGIN = "http://127.0.0.1:3000"
 
@@ -268,6 +274,55 @@ def test_stream_emits_progress_then_result(
     assert payloads[0]["index"] == 1
     assert payloads[-1]["report"]["profile_login"] == "octocat"
     assert payloads[-1]["plan"]["github_is_empty"] is False
+
+
+def test_stream_emits_subprogress_and_report_ready(
+    mocker: MockerFixture, client: FlaskClient, profile_with_repos: Profile
+) -> None:
+    """Sub-progress and the early gap-report event serialize with their own SSE types."""
+    report = GapReport(
+        profile_login="octocat", backed=(), not_shown=(), not_verifiable=(), github_is_empty=False
+    )
+    outcome = _result(profile_with_repos, False)
+
+    def events():
+        yield SubProgressEvent(stage="evidence", detail="Reading repo 1 of 3")
+        yield ReportReady(profile=profile_with_repos, report=report)
+        yield outcome
+
+    mocker.patch.object(webapp, "run_analysis_events", return_value=events())
+
+    resp = client.post("/api/analyze/stream", data={"resume_text": "x", "username": "octocat"})
+
+    payloads = _parse_sse(resp.get_data(as_text=True))
+    assert [p["type"] for p in payloads] == ["subprogress", "report", "result"]
+    assert payloads[0]["stage"] == "evidence"
+    assert payloads[0]["detail"] == "Reading repo 1 of 3"
+    assert payloads[1]["report"]["profile_login"] == "octocat"
+    assert "plan" not in payloads[1]  # the plan isn't ready yet
+
+
+def test_stream_emits_heartbeat_as_a_comment_not_a_data_line(
+    mocker: MockerFixture, client: FlaskClient, profile_with_repos: Profile
+) -> None:
+    """Heartbeats keep the connection alive without the frontend's data: parser seeing them."""
+    from resume_assistant.web.service import Heartbeat
+
+    outcome = _result(profile_with_repos, False)
+
+    def events():
+        yield Heartbeat()
+        yield outcome
+
+    mocker.patch.object(webapp, "run_analysis_events", return_value=events())
+
+    resp = client.post("/api/analyze/stream", data={"resume_text": "x", "username": "octocat"})
+
+    raw = resp.get_data(as_text=True)
+    assert ": heartbeat\n\n" in raw
+    # The frontend only reacts to `data:` lines, so the heartbeat produces no payload.
+    payloads = _parse_sse(raw)
+    assert [p["type"] for p in payloads] == ["result"]
 
 
 def test_stream_delivers_mid_run_error_as_event(mocker: MockerFixture, client: FlaskClient) -> None:

@@ -12,6 +12,7 @@ called.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Protocol
 
 from resume_assistant.core.models import (
@@ -33,7 +34,10 @@ class ClaimVerifier(Protocol):
     """Anything that can grade claims against real code (implemented by AnthropicClient)."""
 
     def verify_claims(
-        self, claims: list[Claim], evidence: list[RepoEvidence]
+        self,
+        claims: list[Claim],
+        evidence: list[RepoEvidence],
+        on_batch_done: Callable[[int, int], None] | None = None,
     ) -> list[ClaimEvidence]: ...
 
 
@@ -43,8 +47,13 @@ def build_gap_report(
     evidence: list[RepoEvidence],
     extractor: ClaimExtractor,
     verifier: ClaimVerifier,
+    on_verify_batch_done: Callable[[int, int], None] | None = None,
 ) -> GapReport:
-    """Grade the resume's claims against real repo evidence and bucket the verdicts."""
+    """Grade the resume's claims against real repo evidence and bucket the verdicts.
+
+    ``on_verify_batch_done``, if given, is forwarded to the verifier so a caller
+    can show progress through claim verification (see ``ClaimVerifier``).
+    """
     claims = extractor.extract_claims(resume_text)
     github_is_empty = not profile.has_public_repos
 
@@ -53,7 +62,7 @@ def build_gap_report(
         # mark against the person. Skip the verifier — there's nothing to cite.
         graded = [_not_shown(claim) for claim in claims]
     else:
-        graded = verifier.verify_claims(claims, evidence)
+        graded = verifier.verify_claims(claims, evidence, on_verify_batch_done)
 
     return _bucket(profile.login, graded, github_is_empty)
 

@@ -32,7 +32,10 @@ from resume_assistant.web.serialize import gap_report_to_dict, project_plan_to_d
 from resume_assistant.web.service import (
     AnalysisError,
     AnalysisResult,
+    Heartbeat,
     ProgressEvent,
+    ReportReady,
+    SubProgressEvent,
     run_analysis,
     run_analysis_events,
 )
@@ -137,13 +140,29 @@ def create_app(config: Config | None = None) -> Flask:
     return app
 
 
-def _sse_stream(
-    events: Iterator[ProgressEvent | AnalysisResult | AnalysisError],
-) -> Iterator[str]:
-    """Serialize analysis events into Server-Sent Events (``data: <json>\\n\\n``)."""
+_StreamEvent = (
+    ProgressEvent | SubProgressEvent | Heartbeat | ReportReady | AnalysisResult | AnalysisError
+)
+
+
+def _sse_stream(events: Iterator[_StreamEvent]) -> Iterator[str]:
+    """Serialize analysis events into Server-Sent Events (``data: <json>\\n\\n``).
+
+    ``Heartbeat`` is sent as a bare SSE comment (``: ...``) rather than a
+    ``data:`` line — the frontend only looks for ``data:`` lines, so a comment
+    is invisible to it while still sending bytes that keep the connection alive
+    (see ``service._run_with_subprogress``).
+    """
     for event in events:
+        if isinstance(event, Heartbeat):
+            yield ": heartbeat\n\n"
+            continue
         if isinstance(event, ProgressEvent):
             payload = {"type": "progress", **asdict(event)}
+        elif isinstance(event, SubProgressEvent):
+            payload = {"type": "subprogress", **asdict(event)}
+        elif isinstance(event, ReportReady):
+            payload = {"type": "report", "report": gap_report_to_dict(event.report)}
         elif isinstance(event, AnalysisResult):
             payload = {
                 "type": "result",

@@ -151,10 +151,7 @@ describe("deriveStats", () => {
 
   describe("deriveDashboardStats", () => {
     it("assembles all stats from an AnalysisResponse", () => {
-      const stats = deriveDashboardStats({
-        report: normalReport,
-        plan: { profile_login: "octocat", suggestions: [], github_is_empty: false },
-      });
+      const stats = deriveDashboardStats({ report: normalReport });
       expect(stats.overallScore).toBeCloseTo(5, 1);
       expect(stats.skillsMatchPct).toBe(50);
       expect(stats.topStrength).toBe("go");

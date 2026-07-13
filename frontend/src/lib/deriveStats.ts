@@ -1,4 +1,4 @@
-import type { AnalysisResponse, ClaimEvidence, GapReport } from "@/lib/types";
+import type { ClaimEvidence, GapReport } from "@/lib/types";
 import { totalClaims } from "@/lib/types";
 
 export type ExperienceLevel = "Entry Level" | "Mid Level" | "Senior Level";
@@ -113,7 +113,7 @@ export interface DashboardStats {
   totalSkills: number;
 }
 
-export function deriveDashboardStats({ report }: AnalysisResponse): DashboardStats {
+export function deriveDashboardStats({ report }: { report: GapReport }): DashboardStats {
   return {
     overallScore: overallScore(report),
     skillsMatchPct: skillsMatchPct(report),

@@ -556,6 +556,47 @@ def test_verify_batches_evidence_and_merges_backed_wins(mocker: MockerFixture) -
     assert verdicts[0].cited_files == ("repo-a/cache.go",)
 
 
+def test_verify_claims_reports_progress_per_batch(mocker: MockerFixture) -> None:
+    """``on_batch_done`` fires once per evidence batch, in order, with the running count."""
+    mocker.patch("resume_assistant.clients.anthropic._EVIDENCE_CHAR_BUDGET", 10)
+    instance = _patch_sdk(mocker)
+    instance.messages.create.return_value = _text_response('{"verdicts": []}')
+    two_repos = _evidence() + [
+        RepoEvidence(
+            repo_name="repo-b",
+            primary_language="Go",
+            language_breakdown=(("Go", 10),),
+            dependencies=(),
+            notable_paths=(),
+            file_count=1,
+            readme_excerpt="other",
+            pushed_at=None,
+        )
+    ]
+
+    calls: list[tuple[int, int]] = []
+    AnthropicClient(api_key="k", model="claude-sonnet-5").verify_claims(
+        [_CLAIMS[0]], two_repos, on_batch_done=lambda done, total: calls.append((done, total))
+    )
+
+    assert calls == [(1, 2), (2, 2)]
+
+
+def test_verify_claims_without_callback_is_unaffected(mocker: MockerFixture) -> None:
+    """Omitting ``on_batch_done`` (the default) still verifies normally."""
+    instance = _patch_sdk(mocker)
+    instance.messages.create.return_value = _text_response(
+        '{"verdicts": [{"claim": "Built a distributed cache in Go", "verdict": "backed", '
+        '"cited_files": ["go-cache/src/cache.go"], "rationale": "found it"}]}'
+    )
+
+    verdicts = AnthropicClient(api_key="k", model="claude-sonnet-5").verify_claims(
+        [_CLAIMS[0]], _evidence()
+    )
+
+    assert verdicts[0].verdict == "backed"
+
+
 def test_verify_unparseable_degrades_to_not_shown(mocker: MockerFixture) -> None:
     """A garbled response must not crash the run — every claim becomes an honest gap."""
     instance = _patch_sdk(mocker)
