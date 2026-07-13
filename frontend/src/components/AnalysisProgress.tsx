@@ -80,7 +80,11 @@ export default function AnalysisProgress({
   }, [progress]);
 
   const scaled = display * STEPS.length;
-  const activeStep = Math.min(Math.floor(scaled), STEPS.length - 1);
+  // A step is "done" once its full share of progress is covered. Using this
+  // (rather than clamping an "active index" to STEPS.length - 1) lets the last
+  // step flip to a checkmark once display reaches 1, instead of staying stuck
+  // showing a spinner forever.
+  const doneCount = Math.min(Math.floor(scaled + 1e-9), STEPS.length);
 
   return (
     <>
@@ -103,9 +107,9 @@ export default function AnalysisProgress({
 
       <div className="pstep-list" role="progressbar" aria-valuenow={Math.round(display * 100)} aria-valuemin={0} aria-valuemax={100}>
         {STEPS.map((step, i) => {
-          const state = i < activeStep ? "done" : i === activeStep ? "now" : "pending";
+          const state = i < doneCount ? "done" : i === doneCount ? "now" : "pending";
           const stepPct =
-            state === "done" ? 100 : state === "now" ? Math.round((scaled - activeStep) * 100) : 0;
+            state === "done" ? 100 : state === "now" ? Math.round((scaled - doneCount) * 100) : 0;
           return (
             <div className={`pstep pstep-${state}`} key={step.title}>
               <span className="pstep-ic">

@@ -51,6 +51,18 @@ describe("AnalysisProgress", () => {
     expect(pending).toHaveTextContent("Pending");
   });
 
+  it("marks every stage done (no stuck spinner) once progress reaches 1", async () => {
+    stubReducedMotion();
+    render(<AnalysisProgress handle="@octocat" progress={1} onCancel={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Generating Report").closest(".pstep")).toHaveClass("pstep-done");
+    });
+    expect(screen.queryByText("Generating Report")?.closest(".pstep")).not.toHaveClass(
+      "pstep-now",
+    );
+  });
+
   it("calls onCancel when Cancel Analysis is clicked", async () => {
     const user = userEvent.setup();
     const onCancel = vi.fn();
