@@ -127,6 +127,24 @@ Two services, deployed separately:
   the project's **Root Directory** to `frontend/`, and set `NEXT_PUBLIC_API_URL`
   to your Render URL. Vercel auto-detects Next.js; no extra config needed.
 
+### Load & performance
+
+- **Latency.** Grounding makes several sequential GitHub + Anthropic calls per
+  repo (evidence fetch, then LLM-graded verdicts), so a full analysis can take
+  tens of seconds — often longer on Render's free tier (0.1 CPU). Budget for
+  it rather than expecting a snappy response.
+- **Timeouts.** `render.yaml` runs gunicorn with `--timeout 120` because the
+  default 30s is routinely exceeded under the free tier's CPU limits; without
+  it gunicorn SIGKILLs the worker mid-request. `/api/analyze/stream` (SSE)
+  exists so the frontend can show real progress instead of a blank spinner
+  for that whole window.
+- **Rate limits.** The API applies per-IP limits via `Flask-Limiter`: 10
+  requests/hour on `/api/analyze` and `/api/analyze/stream` (the routes that
+  burn GitHub + Anthropic quota), 60/hour by default elsewhere. Limits are
+  tracked in-memory, which only holds because Render's free tier runs a
+  single gunicorn worker — scaling to multiple workers would need a shared
+  store (e.g. Redis) instead.
+
 ## Tech stack
 
 - **Backend:** Python 3.11+ with the official `mcp` library; Flask (`flask-cors`)

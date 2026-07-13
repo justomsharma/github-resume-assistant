@@ -30,7 +30,7 @@ jobs:
         run: mypy
 
       - name: Tests (pytest)
-        run: pytest
+        run: pytest --cov=resume_assistant --cov-report=term-missing --cov-fail-under=90
 
   docker-build:
     runs-on: ubuntu-latest
