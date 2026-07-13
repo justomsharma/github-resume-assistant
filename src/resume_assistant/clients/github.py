@@ -244,7 +244,11 @@ class GitHubClient:
                 delay = _BACKOFF_BASE_SECONDS * 2**attempt
                 logger.warning(
                     "GitHub request error on attempt %d/%d for %s: %r — retrying in %.1fs",
-                    attempt + 1, _MAX_RETRIES, url, exc, delay,
+                    attempt + 1,
+                    _MAX_RETRIES,
+                    url,
+                    exc,
+                    delay,
                 )
                 time.sleep(delay)
                 continue
@@ -260,7 +264,8 @@ class GitHubClient:
                 if retry_after is not None and retry_after <= _MAX_RETRY_AFTER_SECONDS:
                     logger.warning(
                         "GitHub rate limit hit for %s — waiting %ds before retrying",
-                        url, retry_after,
+                        url,
+                        retry_after,
                     )
                     time.sleep(retry_after)
                     continue
@@ -273,7 +278,11 @@ class GitHubClient:
                 delay = _BACKOFF_BASE_SECONDS * 2**attempt
                 logger.warning(
                     "GitHub server error %d on attempt %d/%d for %s — retrying in %.1fs",
-                    response.status_code, attempt + 1, _MAX_RETRIES, url, delay,
+                    response.status_code,
+                    attempt + 1,
+                    _MAX_RETRIES,
+                    url,
+                    delay,
                 )
                 time.sleep(delay)
                 continue

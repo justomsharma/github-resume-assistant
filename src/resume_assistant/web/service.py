@@ -204,9 +204,7 @@ _UNEXPECTED_ERROR_MESSAGE = (
 )
 
 
-def run_analysis_events(
-    resume_text: str, username: str, config: Config
-) -> Iterator[_StreamEvent]:
+def run_analysis_events(resume_text: str, username: str, config: Config) -> Iterator[_StreamEvent]:
     """Run the analysis, yielding a ``ProgressEvent`` after each real stage.
 
     ``evidence`` and ``report`` — the two stages that dominate wall-clock time on

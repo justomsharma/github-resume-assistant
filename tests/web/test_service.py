@@ -249,9 +249,10 @@ def test_events_yield_four_stages_then_result(
     # The report is ready (and streamed) right after its stage, before the plan is built.
     assert len(report_ready) == 1
     assert report_ready[0].report is report
-    assert events.index(report_ready[0]) == events.index(
-        next(e for e in progress if e.stage == "report")
-    ) + 1
+    assert (
+        events.index(report_ready[0])
+        == events.index(next(e for e in progress if e.stage == "report")) + 1
+    )
     assert isinstance(terminal, AnalysisResult)
     assert terminal.report is report
     assert terminal.plan is plan
